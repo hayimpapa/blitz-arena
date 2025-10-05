@@ -3,26 +3,21 @@
 import { useState, useEffect } from 'react';
 import { useSocket } from '@/contexts/SocketContext';
 
-export default function GameLobby({ onGameSelect }) {
+export default function GameLobby({ onGameSelect, onViewLeaderboard, username }) {
   const { socket, connected } = useSocket();
   const [playerCounts, setPlayerCounts] = useState({
     speedTicTacToe: 0
   });
-  const [playerName, setPlayerName] = useState('');
-  const [isNameSet, setIsNameSet] = useState(false);
 
   useEffect(() => {
     if (!socket) return;
 
-    // Request player counts when connected
     socket.emit('request_player_counts');
 
-    // Listen for player count updates
     socket.on('player_counts', (counts) => {
       setPlayerCounts(counts);
     });
 
-    // Request updates every 5 seconds
     const interval = setInterval(() => {
       socket.emit('request_player_counts');
     }, 5000);
@@ -33,67 +28,9 @@ export default function GameLobby({ onGameSelect }) {
     };
   }, [socket]);
 
-  const handleNameSubmit = (e) => {
-    e.preventDefault();
-    if (playerName.trim()) {
-      setIsNameSet(true);
-    }
-  };
-
   const handlePlayGame = (gameType) => {
-    if (!isNameSet || !playerName.trim()) {
-      alert('Please enter your name first!');
-      return;
-    }
-    onGameSelect(gameType, playerName);
+    onGameSelect(gameType);
   };
-
-  if (!isNameSet) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center p-4">
-        <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full">
-          <h1 className="text-4xl font-bold text-center mb-2 text-gray-800">
-            ⚡ Blitz Arena
-          </h1>
-          <p className="text-center text-gray-600 mb-8">
-            Quick PVP Games • Under 2 Minutes
-          </p>
-          
-          <form onSubmit={handleNameSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Enter Your Name
-              </label>
-              <input
-                type="text"
-                value={playerName}
-                onChange={(e) => setPlayerName(e.target.value)}
-                placeholder="Player Name"
-                maxLength={20}
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:border-purple-500 text-lg"
-                autoFocus
-              />
-            </div>
-            
-            <button
-              type="submit"
-              className="w-full bg-purple-600 text-white font-bold py-4 rounded-xl hover:bg-purple-700 transition-colors text-lg"
-            >
-              Continue
-            </button>
-          </form>
-          
-          <div className="mt-6 text-center text-sm text-gray-500">
-            {connected ? (
-              <span className="text-green-600">● Connected</span>
-            ) : (
-              <span className="text-red-600">● Connecting...</span>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 p-4">
@@ -103,8 +40,18 @@ export default function GameLobby({ onGameSelect }) {
             ⚡ Blitz Arena
           </h1>
           <p className="text-xl text-purple-100">
-            Welcome, {playerName}!
+            Welcome, {username}!
           </p>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex justify-center gap-4 mb-8">
+          <button
+            onClick={onViewLeaderboard}
+            className="bg-white text-purple-600 font-bold py-3 px-6 rounded-xl hover:bg-purple-50 transition-colors"
+          >
+            🏆 Leaderboard
+          </button>
         </div>
 
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -195,15 +142,6 @@ export default function GameLobby({ onGameSelect }) {
               Coming Soon
             </button>
           </div>
-        </div>
-
-        <div className="mt-8 text-center">
-          <button
-            onClick={() => setIsNameSet(false)}
-            className="text-white hover:text-purple-200 transition-colors underline"
-          >
-            Change Name
-          </button>
         </div>
       </div>
     </div>

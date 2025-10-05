@@ -3,6 +3,7 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
+const supabase = require('./supabaseClient');
 
 const app = express();
 const server = http.createServer(app);
@@ -19,12 +20,21 @@ app.use(express.json());
 
 // Game state management
 const gameRooms = new Map();
-const waitingPlayers = new Map(); // gameType -> array of player sockets
-const playerStats = new Map(); // playerId -> {wins, losses, gamesPlayed}
+const waitingPlayers = new Map();
+const playerSessions = new Map(); // socketId -> userId mapping
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
   console.log('New player connected:', socket.id);
+
+  // Authenticate user session
+  socket.on('authenticate', async (data) => {
+    const { userId } = data;
+    if (userId) {
+      playerSessions.set(socket.id, userId);
+      console.log('User authenticated:', userId);
+    }
+  });
 
   // Send current online player counts
   socket.on('request_player_counts', () => {
@@ -37,20 +47,20 @@ io.on('connection', (socket) => {
   });
 
   // Player joins matchmaking queue
-  socket.on('join_queue', (data) => {
-    const { gameType, playerId, playerName } = data;
+  socket.on('join_queue', async (data) => {
+    const { gameType, userId, playerName } = data;
     
     if (!waitingPlayers.has(gameType)) {
       waitingPlayers.set(gameType, []);
     }
     
     const queue = waitingPlayers.get(gameType);
-    const playerData = { socket, playerId, playerName };
+    const playerData = { socket, userId, playerName };
     
     // Check if there's someone waiting
     if (queue.length > 0) {
       const opponent = queue.shift();
-      createGameRoom(gameType, playerData, opponent);
+      await createGameRoom(gameType, playerData, opponent);
     } else {
       queue.push(playerData);
       socket.emit('queue_joined', { position: queue.length });
@@ -79,7 +89,6 @@ io.on('connection', (socket) => {
     
     if (!room) return;
     
-    // Process move based on game type
     if (room.gameType === 'speedTicTacToe') {
       handleTicTacToeMove(room, socket, move);
     }
@@ -89,12 +98,13 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('Player disconnected:', socket.id);
     handlePlayerDisconnect(socket);
+    playerSessions.delete(socket.id);
     broadcastPlayerCounts();
   });
 });
 
 // Create a new game room
-function createGameRoom(gameType, player1, player2) {
+async function createGameRoom(gameType, player1, player2) {
   const roomId = `${gameType}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   
   const room = {
@@ -139,30 +149,32 @@ function handleTicTacToeMove(room, socket, move) {
   const { position } = move;
   const playerIndex = room.players.findIndex(p => p.socket.id === socket.id);
   
-  // Validate move
+  console.log('Move attempt:', { position, playerIndex, currentPlayer: room.currentPlayer, board: room.board });
+  
   if (playerIndex !== room.currentPlayer) {
+    console.log('Invalid move: Not your turn');
     socket.emit('invalid_move', { reason: 'Not your turn' });
     return;
   }
   
   if (room.board[position] !== null) {
+    console.log('Invalid move: Position occupied');
     socket.emit('invalid_move', { reason: 'Position occupied' });
     return;
   }
   
-  // Make move
   room.board[position] = playerIndex === 0 ? 'X' : 'O';
+  console.log('Move made:', { position, symbol: room.board[position], newBoard: room.board });
   
-  // Check win condition
   const winner = checkWinner(room.board);
   
   if (winner) {
     handleRoundEnd(room, winner === 'X' ? 0 : 1);
   } else if (room.board.every(cell => cell !== null)) {
-    handleRoundEnd(room, -1); // Draw
+    handleRoundEnd(room, -1);
   } else {
-    // Switch player
     room.currentPlayer = 1 - room.currentPlayer;
+    console.log('Next player turn:', room.currentPlayer);
     io.to(room.id).emit('game_state', getGameState(room));
   }
 }
@@ -170,9 +182,9 @@ function handleTicTacToeMove(room, socket, move) {
 // Check for winner in Tic-Tac-Toe
 function checkWinner(board) {
   const lines = [
-    [0, 1, 2], [3, 4, 5], [6, 7, 8], // Rows
-    [0, 3, 6], [1, 4, 7], [2, 5, 8], // Columns
-    [0, 4, 8], [2, 4, 6] // Diagonals
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6]
   ];
   
   for (let line of lines) {
@@ -192,13 +204,16 @@ function handleRoundEnd(room, winnerIndex) {
   
   room.currentRound++;
   
-  // Check if match is over (best of 5)
+  console.log('Round ended:', { winnerIndex, scores: room.scores, currentRound: room.currentRound });
+  
   if (room.currentRound >= 5 || room.scores[0] >= 3 || room.scores[1] >= 3) {
     handleMatchEnd(room);
   } else {
     // Reset board for next round
     room.board = Array(9).fill(null);
-    room.currentPlayer = room.currentRound % 2; // Alternate who goes first
+    room.currentPlayer = room.currentRound % 2;
+    
+    console.log('Starting next round:', { round: room.currentRound + 1, firstPlayer: room.currentPlayer });
     
     io.to(room.id).emit('round_end', {
       winner: winnerIndex,
@@ -208,42 +223,99 @@ function handleRoundEnd(room, winnerIndex) {
     
     // Start next round after brief delay
     setTimeout(() => {
+      console.log('Sending new game state for round:', room.currentRound + 1);
       io.to(room.id).emit('game_state', getGameState(room));
     }, 2000);
   }
 }
 
 // Handle match end
-function handleMatchEnd(room) {
-  const winnerIndex = room.scores[0] > room.scores[1] ? 0 : 1;
+async function handleMatchEnd(room) {
+  const winnerIndex = room.scores[0] > room.scores[1] ? 0 : room.scores[1] > room.scores[0] ? 1 : -1;
+  const duration = Math.floor((Date.now() - room.startTime) / 1000);
   
   io.to(room.id).emit('match_end', {
     winner: winnerIndex,
     finalScores: room.scores
   });
   
-  // Update player stats
-  updatePlayerStats(room.players[winnerIndex].playerId, true);
-  updatePlayerStats(room.players[1 - winnerIndex].playerId, false);
+  // Save match to database
+  try {
+    const player1Id = room.players[0].userId;
+    const player2Id = room.players[1].userId;
+    const winnerId = winnerIndex >= 0 ? room.players[winnerIndex].userId : null;
+    
+    // Save match history
+    await supabase.from('match_history').insert({
+      game_type: room.gameType,
+      player1_id: player1Id,
+      player2_id: player2Id,
+      winner_id: winnerId,
+      player1_score: room.scores[0],
+      player2_score: room.scores[1],
+      duration_seconds: duration
+    });
+    
+    // Update player stats - only if not a draw
+    if (winnerIndex >= 0) {
+      await updatePlayerStats(player1Id, room.gameType, winnerIndex === 0, room.scores[0], room.scores[1]);
+      await updatePlayerStats(player2Id, room.gameType, winnerIndex === 1, room.scores[1], room.scores[0]);
+    } else {
+      // Draw - update stats but no win/loss
+      await updatePlayerStats(player1Id, room.gameType, null, room.scores[0], room.scores[1]);
+      await updatePlayerStats(player2Id, room.gameType, null, room.scores[1], room.scores[0]);
+    }
+    
+    console.log('Match saved to database');
+  } catch (error) {
+    console.error('Error saving match:', error);
+  }
   
-  // Clean up room after delay
   setTimeout(() => {
     gameRooms.delete(room.id);
   }, 5000);
 }
 
-// Update player statistics
-function updatePlayerStats(playerId, won) {
-  if (!playerStats.has(playerId)) {
-    playerStats.set(playerId, { wins: 0, losses: 0, gamesPlayed: 0 });
-  }
-  
-  const stats = playerStats.get(playerId);
-  stats.gamesPlayed++;
-  if (won) {
-    stats.wins++;
-  } else {
-    stats.losses++;
+// Update player statistics in database
+async function updatePlayerStats(userId, gameType, won, roundsWon, roundsLost) {
+  try {
+    // Get existing stats
+    const { data: existingStats } = await supabase
+      .from('game_stats')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('game_type', gameType)
+      .single();
+    
+    if (existingStats) {
+      // Update existing stats
+      await supabase
+        .from('game_stats')
+        .update({
+          wins: existingStats.wins + (won ? 1 : 0),
+          losses: existingStats.losses + (won ? 0 : 1),
+          games_played: existingStats.games_played + 1,
+          total_rounds_won: existingStats.total_rounds_won + roundsWon,
+          total_rounds_lost: existingStats.total_rounds_lost + roundsLost
+        })
+        .eq('user_id', userId)
+        .eq('game_type', gameType);
+    } else {
+      // Create new stats
+      await supabase
+        .from('game_stats')
+        .insert({
+          user_id: userId,
+          game_type: gameType,
+          wins: won ? 1 : 0,
+          losses: won ? 0 : 1,
+          games_played: 1,
+          total_rounds_won: roundsWon,
+          total_rounds_lost: roundsLost
+        });
+    }
+  } catch (error) {
+    console.error('Error updating player stats:', error);
   }
 }
 
@@ -259,7 +331,6 @@ function getGameState(room) {
 
 // Handle player disconnect
 function handlePlayerDisconnect(socket) {
-  // Remove from waiting queues
   waitingPlayers.forEach((queue, gameType) => {
     const index = queue.findIndex(p => p.socket.id === socket.id);
     if (index > -1) {
@@ -267,24 +338,41 @@ function handlePlayerDisconnect(socket) {
     }
   });
   
-  // Handle active games
-  gameRooms.forEach((room, roomId) => {
+  gameRooms.forEach(async (room, roomId) => {
     const playerIndex = room.players.findIndex(p => p.socket.id === socket.id);
     if (playerIndex > -1) {
-      // Notify opponent
       const opponentIndex = 1 - playerIndex;
       room.players[opponentIndex].socket.emit('opponent_disconnected');
       
       // Award win to remaining player
-      updatePlayerStats(room.players[opponentIndex].playerId, true);
-      updatePlayerStats(room.players[playerIndex].playerId, false);
+      const duration = Math.floor((Date.now() - room.startTime) / 1000);
+      
+      try {
+        const winnerId = room.players[opponentIndex].userId;
+        const loserId = room.players[playerIndex].userId;
+        
+        await supabase.from('match_history').insert({
+          game_type: room.gameType,
+          player1_id: room.players[0].userId,
+          player2_id: room.players[1].userId,
+          winner_id: winnerId,
+          player1_score: playerIndex === 0 ? 0 : 5,
+          player2_score: playerIndex === 1 ? 0 : 5,
+          duration_seconds: duration
+        });
+        
+        await updatePlayerStats(winnerId, room.gameType, true, 5, 0);
+        await updatePlayerStats(loserId, room.gameType, false, 0, 5);
+      } catch (error) {
+        console.error('Error saving disconnect match:', error);
+      }
       
       gameRooms.delete(roomId);
     }
   });
 }
 
-// Broadcast player counts to all connected clients
+// Broadcast player counts
 function broadcastPlayerCounts() {
   const counts = {
     speedTicTacToe: (waitingPlayers.get('speedTicTacToe')?.length || 0) + 
@@ -299,23 +387,66 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
 
-app.get('/api/leaderboard/:gameType', (req, res) => {
-  const { gameType } = req.params;
-  
-  const leaderboard = Array.from(playerStats.entries())
-    .map(([playerId, stats]) => ({
-      playerId,
-      ...stats,
-      winRate: stats.gamesPlayed > 0 ? (stats.wins / stats.gamesPlayed * 100).toFixed(1) : 0
-    }))
-    .sort((a, b) => b.wins - a.wins)
-    .slice(0, 100);
-  
-  res.json(leaderboard);
+app.get('/api/leaderboard/:gameType', async (req, res) => {
+  try {
+    const { gameType } = req.params;
+    
+    const { data, error } = await supabase
+      .from('game_stats')
+      .select(`
+        *,
+        profiles:user_id (username)
+      `)
+      .eq('game_type', gameType)
+      .order('wins', { ascending: false })
+      .limit(100);
+    
+    if (error) throw error;
+    
+    const leaderboard = data.map(stat => ({
+      username: stat.profiles?.username || 'Unknown',
+      wins: stat.wins,
+      losses: stat.losses,
+      gamesPlayed: stat.games_played,
+      winRate: stat.games_played > 0 ? ((stat.wins / stat.games_played) * 100).toFixed(1) : '0.0'
+    }));
+    
+    res.json(leaderboard);
+  } catch (error) {
+    console.error('Error fetching leaderboard:', error);
+    res.status(500).json({ error: 'Failed to fetch leaderboard' });
+  }
+});
+
+app.get('/api/user-stats/:userId/:gameType', async (req, res) => {
+  try {
+    const { userId, gameType } = req.params;
+    
+    const { data, error } = await supabase
+      .from('game_stats')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('game_type', gameType)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') throw error;
+    
+    res.json(data || {
+      wins: 0,
+      losses: 0,
+      games_played: 0,
+      total_rounds_won: 0,
+      total_rounds_lost: 0
+    });
+  } catch (error) {
+    console.error('Error fetching user stats:', error);
+    res.status(500).json({ error: 'Failed to fetch user stats' });
+  }
 });
 
 const PORT = process.env.PORT || 3001;
 
 server.listen(PORT, () => {
   console.log(`🚀 Blitz Arena server running on port ${PORT}`);
+  console.log(`✅ Connected to Supabase`);
 });

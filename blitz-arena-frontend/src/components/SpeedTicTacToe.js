@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useSocket } from '@/contexts/SocketContext';
 
-export default function SpeedTicTacToe({ playerName, onBackToLobby }) {
+export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
   const { socket } = useSocket();
-  const [gameState, setGameState] = useState('matchmaking'); // matchmaking, playing, round_end, match_end
+  const [gameState, setGameState] = useState('matchmaking');
   const [roomId, setRoomId] = useState(null);
   const [playerNumber, setPlayerNumber] = useState(null);
   const [opponentName, setOpponentName] = useState('');
@@ -20,20 +20,30 @@ export default function SpeedTicTacToe({ playerName, onBackToLobby }) {
   useEffect(() => {
     if (!socket) return;
 
-    // Join matchmaking queue
-    const playerId = `player_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    socket.emit('join_queue', {
-      gameType: 'speedTicTacToe',
-      playerId,
-      playerName
-    });
+    // Track if we've already set up listeners
+    let setupComplete = false;
 
-    // Handle queue joined
+    const setupGame = () => {
+      if (setupComplete) return;
+      setupComplete = true;
+
+      // Authenticate with backend
+      socket.emit('authenticate', { userId });
+
+      // Join matchmaking queue
+      socket.emit('join_queue', {
+        gameType: 'speedTicTacToe',
+        userId,
+        playerName: username
+      });
+    };
+
+    setupGame();
+
     socket.on('queue_joined', (data) => {
       console.log('Joined queue, position:', data.position);
     });
 
-    // Handle game start
     socket.on('game_start', (data) => {
       console.log('Game started:', data);
       setRoomId(data.roomId);
@@ -43,34 +53,28 @@ export default function SpeedTicTacToe({ playerName, onBackToLobby }) {
       setGameState('playing');
     });
 
-    // Handle game state updates
     socket.on('game_state', (state) => {
       console.log('Game state update:', state);
       setBoard(state.board);
       setCurrentPlayer(state.currentPlayer);
       setScores(state.scores);
       setRound(state.round);
-      setTimeLeft(10); // Reset timer
-      if (gameState !== 'playing') {
-        setGameState('playing');
-      }
+      setTimeLeft(10);
+      setGameState('playing');
     });
 
-    // Handle round end
     socket.on('round_end', (data) => {
       console.log('Round ended:', data);
       setWinner(data.winner);
       setScores(data.scores);
       setGameState('round_end');
       
-      // Auto-continue to next round
       setTimeout(() => {
         setWinner(null);
         setGameState('playing');
       }, 2000);
     });
 
-    // Handle match end
     socket.on('match_end', (data) => {
       console.log('Match ended:', data);
       setWinner(data.winner);
@@ -78,7 +82,6 @@ export default function SpeedTicTacToe({ playerName, onBackToLobby }) {
       setGameState('match_end');
     });
 
-    // Handle opponent disconnect
     socket.on('opponent_disconnected', () => {
       alert('Opponent disconnected. You win!');
       onBackToLobby();
@@ -93,9 +96,8 @@ export default function SpeedTicTacToe({ playerName, onBackToLobby }) {
       socket.off('match_end');
       socket.off('opponent_disconnected');
     };
-  }, [socket, playerName, onBackToLobby]);
+  }, [socket, userId, username, onBackToLobby]);
 
-  // Timer countdown
   useEffect(() => {
     if (gameState !== 'playing') return;
     if (currentPlayer !== playerNumber) return;
@@ -103,7 +105,6 @@ export default function SpeedTicTacToe({ playerName, onBackToLobby }) {
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
-          // Time's up - auto-forfeit
           alert('Time\'s up! You lost this round.');
           return 10;
         }
@@ -125,7 +126,6 @@ export default function SpeedTicTacToe({ playerName, onBackToLobby }) {
     });
   };
 
-  // Matchmaking screen
   if (gameState === 'matchmaking') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center p-4">
@@ -160,13 +160,12 @@ export default function SpeedTicTacToe({ playerName, onBackToLobby }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 p-4">
       <div className="max-w-2xl mx-auto pt-8">
-        {/* Header */}
         <div className="bg-white rounded-3xl shadow-2xl p-6 mb-6">
           <div className="flex justify-between items-center mb-4">
             <div className="text-center flex-1">
               <div className="text-sm text-gray-600">You ({symbol})</div>
               <div className="text-2xl font-bold text-purple-600">{myScore}</div>
-              <div className="text-xs text-gray-500">{playerName}</div>
+              <div className="text-xs text-gray-500">{username}</div>
             </div>
             
             <div className="text-center px-6">
@@ -181,7 +180,6 @@ export default function SpeedTicTacToe({ playerName, onBackToLobby }) {
             </div>
           </div>
 
-          {/* Turn indicator */}
           {gameState === 'playing' && (
             <div className={`text-center py-3 rounded-xl font-bold ${
               isMyTurn ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
@@ -202,24 +200,21 @@ export default function SpeedTicTacToe({ playerName, onBackToLobby }) {
             </div>
           )}
 
-          {/* Round end message */}
           {gameState === 'round_end' && (
             <div className="text-center py-3 rounded-xl font-bold bg-yellow-100 text-yellow-800">
               {winner === -1 ? "DRAW!" : winner === playerNumber ? "YOU WON THIS ROUND!" : "OPPONENT WON THIS ROUND!"}
             </div>
           )}
 
-          {/* Match end message */}
           {gameState === 'match_end' && (
             <div className={`text-center py-4 rounded-xl font-bold text-2xl ${
-              winner === playerNumber ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+              winner === -1 ? 'bg-yellow-100 text-yellow-800' : winner === playerNumber ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
             }`}>
-              {winner === playerNumber ? '🎉 YOU WIN! 🎉' : '😢 YOU LOSE'}
+              {winner === -1 ? '🤝 DRAW! 🤝' : winner === playerNumber ? '🎉 YOU WIN! 🎉' : '😢 YOU LOSE'}
             </div>
           )}
         </div>
 
-        {/* Game Board */}
         <div className="bg-white rounded-3xl shadow-2xl p-6 mb-6">
           <div className="grid grid-cols-3 gap-3 max-w-sm mx-auto">
             {board.map((cell, index) => (
@@ -241,7 +236,6 @@ export default function SpeedTicTacToe({ playerName, onBackToLobby }) {
           </div>
         </div>
 
-        {/* Actions */}
         {gameState === 'match_end' && (
           <div className="text-center space-y-4">
             <button
