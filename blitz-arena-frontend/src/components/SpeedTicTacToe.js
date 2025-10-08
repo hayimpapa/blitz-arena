@@ -16,6 +16,8 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
   const [round, setRound] = useState(1);
   const [winner, setWinner] = useState(null);
   const [timeLeft, setTimeLeft] = useState(10);
+  const [rematchRequested, setRematchRequested] = useState(false);
+  const [opponentWantsRematch, setOpponentWantsRematch] = useState(false);
 
   useEffect(() => {
     if (!socket) return;
@@ -44,13 +46,22 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
       console.log('Joined queue, position:', data.position);
     });
 
-    socket.on('game_start', (data) => {
+  socket.on('game_start', (data) => {
       console.log('Game started:', data);
       setRoomId(data.roomId);
       setPlayerNumber(data.playerNumber);
       setOpponentName(data.opponent);
       setSymbol(data.symbol);
       setGameState('playing');
+      // Reset rematch states for new game
+      setRematchRequested(false);
+      setOpponentWantsRematch(false);
+      // Reset game states
+      setBoard(Array(9).fill(null));
+      setRound(1);
+      setScores([0, 0]);
+      setWinner(null);
+      setTimeLeft(10);
     });
 
     socket.on('game_state', (state) => {
@@ -87,7 +98,21 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
       onBackToLobby();
     });
 
-    return () => {
+    socket.on('opponent_wants_rematch', () => {
+      console.log('Opponent wants rematch');
+      setOpponentWantsRematch(true);
+    });
+
+    socket.on('rematch_declined', () => {
+      alert('Opponent declined the rematch');
+      setRematchRequested(false);
+      setOpponentWantsRematch(false);
+      onBackToLobby();
+    });
+
+  
+
+  return () => {
       socket.emit('leave_queue', { gameType: 'speedTicTacToe' });
       socket.off('queue_joined');
       socket.off('game_start');
@@ -95,6 +120,8 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
       socket.off('round_end');
       socket.off('match_end');
       socket.off('opponent_disconnected');
+      socket.off('opponent_wants_rematch');
+      socket.off('rematch_declined');
     };
   }, [socket, userId, username, onBackToLobby]);
 
@@ -124,6 +151,18 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
       roomId,
       move: { position }
     });
+  };
+
+  const handleRematchRequest = () => {
+    setRematchRequested(true);
+    socket.emit('request_rematch', { roomId });
+  };
+
+  const handleRematchDecline = () => {
+    socket.emit('decline_rematch', { roomId });
+    setRematchRequested(false);
+    setOpponentWantsRematch(false);
+    onBackToLobby();
   };
 
   if (gameState === 'matchmaking') {
@@ -206,14 +245,79 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
             </div>
           )}
 
-          {gameState === 'match_end' && (
-            <div className={`text-center py-4 rounded-xl font-bold text-2xl ${
-              winner === -1 ? 'bg-yellow-100 text-yellow-800' : winner === playerNumber ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-            }`}>
-              {winner === -1 ? '🤝 DRAW! 🤝' : winner === playerNumber ? '🎉 YOU WIN! 🎉' : '😢 YOU LOSE'}
-            </div>
-          )}
-        </div>
+{gameState === 'match_end' && (
+          <div className="bg-white rounded-3xl shadow-2xl p-6">
+            {/* Rematch Options */}
+            {!rematchRequested && !opponentWantsRematch && (
+              <div className="space-y-4">
+                <button
+                  onClick={handleRematchRequest}
+                  className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-8 rounded-xl transition-colors text-lg"
+                >
+                  🔄 Play Again
+                </button>
+                <button
+                  onClick={onBackToLobby}
+                  className="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-4 px-8 rounded-xl transition-colors"
+                >
+                  Back to Lobby
+                </button>
+              </div>
+            )}
+
+            {rematchRequested && !opponentWantsRematch && (
+              <div className="text-center space-y-4">
+                <div className="text-xl font-bold text-yellow-600">
+                  ⏳ Waiting for opponent...
+                </div>
+                <p className="text-gray-600">
+                  Waiting for {opponentName} to accept
+                </p>
+                <button
+                  onClick={handleRematchDecline}
+                  className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {opponentWantsRematch && !rematchRequested && (
+              <div className="space-y-4">
+                <div className="text-center text-xl font-bold text-green-600 mb-4">
+                  🎮 {opponentName} wants a rematch!
+                </div>
+                <button
+                  onClick={handleRematchRequest}
+                  className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-8 rounded-xl transition-colors text-lg"
+                >
+                  ✓ Accept Rematch
+                </button>
+                <button
+                  onClick={handleRematchDecline}
+                  className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-xl transition-colors"
+                >
+                  ✗ Decline
+                </button>
+              </div>
+            )}
+
+            {rematchRequested && opponentWantsRematch && (
+              <div className="text-center space-y-4">
+                <div className="text-2xl font-bold text-green-600 animate-pulse">
+                  🎮 Starting rematch...
+                </div>
+                <div className="flex justify-center space-x-2">
+                  <div className="w-3 h-3 bg-green-600 rounded-full animate-bounce"></div>
+                  <div className="w-3 h-3 bg-green-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-3 h-3 bg-green-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        
+         </div>
 
         <div className="bg-white rounded-3xl shadow-2xl p-6 mb-6">
           <div className="grid grid-cols-3 gap-3 max-w-sm mx-auto">

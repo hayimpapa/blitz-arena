@@ -14,6 +14,7 @@ const io = socketIo(server, {
   }
 });
 
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -22,6 +23,7 @@ app.use(express.json());
 const gameRooms = new Map();
 const waitingPlayers = new Map();
 const playerSessions = new Map(); // socketId -> userId mapping
+const rematchRequests = new Map(); // roomId -> Set of socketIds who want rematch
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
@@ -93,6 +95,77 @@ io.on('connection', (socket) => {
       handleTicTacToeMove(room, socket, move);
     }
   });
+// Handle rematch request
+  socket.on('request_rematch', (data) => {
+    const { roomId } = data;
+    const room = gameRooms.get(roomId);
+    
+    if (!room) {
+      socket.emit('rematch_error', { message: 'Game room not found' });
+      return;
+    }
+
+    // Initialize rematch requests for this room if needed
+    if (!rematchRequests.has(roomId)) {
+      rematchRequests.set(roomId, new Set());
+    }
+
+    // Add this player's request
+    rematchRequests.get(roomId).add(socket.id);
+    
+    // Find opponent
+    const playerIndex = room.players.findIndex(p => p.socket.id === socket.id);
+    if (playerIndex === -1) return;
+    
+    const opponentIndex = 1 - playerIndex;
+    const opponentSocket = room.players[opponentIndex].socket;
+
+    // Notify opponent
+    opponentSocket.emit('opponent_wants_rematch');
+
+    // Check if both players want rematch
+// Check if both players want rematch
+    if (rematchRequests.get(roomId).size === 2) {
+      // Both players ready - create new game
+      const player1 = room.players[0];
+      const player2 = room.players[1];
+      const gameType = room.gameType;
+      
+      // Clean up rematch requests first
+      rematchRequests.delete(roomId);
+      
+      // Create new game BEFORE deleting old room
+      createGameRoom(gameType, player1, player2);
+      
+      // Now delete old room
+      setTimeout(() => {
+        gameRooms.delete(roomId);
+      }, 1000);
+    }
+  });
+
+  // Handle rematch decline
+  socket.on('decline_rematch', (data) => {
+    const { roomId } = data;
+    const room = gameRooms.get(roomId);
+    
+    if (!room) return;
+
+    // Find opponent
+    const playerIndex = room.players.findIndex(p => p.socket.id === socket.id);
+    if (playerIndex === -1) return;
+    
+    const opponentIndex = 1 - playerIndex;
+    const opponentSocket = room.players[opponentIndex].socket;
+
+    // Notify opponent
+    opponentSocket.emit('rematch_declined');
+
+    // Clean up
+    rematchRequests.delete(roomId);
+    gameRooms.delete(roomId);
+  });
+
 
   // Handle disconnection
   socket.on('disconnect', () => {
