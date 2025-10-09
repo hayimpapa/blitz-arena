@@ -110,7 +110,21 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
       onBackToLobby();
     });
 
-  
+    socket.on('rematch_timeout', () => {
+      alert('Opponent left');
+      setRematchRequested(false);
+      setOpponentWantsRematch(false);
+      onBackToLobby();
+    });
+
+    socket.on('rematch_opponent_left', () => {
+      alert('Opponent left');
+      setRematchRequested(false);
+      setOpponentWantsRematch(false);
+      onBackToLobby();
+    });
+
+
 
   return () => {
       socket.emit('leave_queue', { gameType: 'speedTicTacToe' });
@@ -122,6 +136,8 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
       socket.off('opponent_disconnected');
       socket.off('opponent_wants_rematch');
       socket.off('rematch_declined');
+      socket.off('rematch_timeout');
+      socket.off('rematch_opponent_left');
     };
   }, [socket, userId, username, onBackToLobby]);
 

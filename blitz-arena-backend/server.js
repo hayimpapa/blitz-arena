@@ -24,6 +24,7 @@ const gameRooms = new Map();
 const waitingPlayers = new Map();
 const playerSessions = new Map(); // socketId -> userId mapping
 const rematchRequests = new Map(); // roomId -> Set of socketIds who want rematch
+const rematchTimeouts = new Map(); // roomId -> timeout ID for auto-cancel
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
@@ -99,7 +100,7 @@ io.on('connection', (socket) => {
   socket.on('request_rematch', (data) => {
     const { roomId } = data;
     const room = gameRooms.get(roomId);
-    
+
     if (!room) {
       socket.emit('rematch_error', { message: 'Game room not found' });
       return;
@@ -112,31 +113,60 @@ io.on('connection', (socket) => {
 
     // Add this player's request
     rematchRequests.get(roomId).add(socket.id);
-    
+
     // Find opponent
     const playerIndex = room.players.findIndex(p => p.socket.id === socket.id);
     if (playerIndex === -1) return;
-    
+
     const opponentIndex = 1 - playerIndex;
     const opponentSocket = room.players[opponentIndex].socket;
 
     // Notify opponent
     opponentSocket.emit('opponent_wants_rematch');
 
+    // Set timeout for auto-cancel if this is the first request
+    if (rematchRequests.get(roomId).size === 1) {
+      const timeoutId = setTimeout(() => {
+        // Check if room and request still exist
+        if (rematchRequests.has(roomId) && rematchRequests.get(roomId).size === 1) {
+          // Only one player requested - timeout
+          console.log('Rematch timeout for room:', roomId);
+
+          // Notify the player who requested
+          socket.emit('rematch_timeout');
+
+          // Notify opponent that requester left
+          opponentSocket.emit('rematch_opponent_left');
+
+          // Clean up
+          rematchRequests.delete(roomId);
+          rematchTimeouts.delete(roomId);
+          gameRooms.delete(roomId);
+        }
+      }, 30000); // 30 seconds
+
+      rematchTimeouts.set(roomId, timeoutId);
+    }
+
     // Check if both players want rematch
-// Check if both players want rematch
     if (rematchRequests.get(roomId).size === 2) {
       // Both players ready - create new game
       const player1 = room.players[0];
       const player2 = room.players[1];
       const gameType = room.gameType;
-      
-      // Clean up rematch requests first
+
+      // Clear timeout since both accepted
+      if (rematchTimeouts.has(roomId)) {
+        clearTimeout(rematchTimeouts.get(roomId));
+        rematchTimeouts.delete(roomId);
+      }
+
+      // Clean up rematch requests
       rematchRequests.delete(roomId);
-      
+
       // Create new game BEFORE deleting old room
       createGameRoom(gameType, player1, player2);
-      
+
       // Now delete old room
       setTimeout(() => {
         gameRooms.delete(roomId);
@@ -148,18 +178,24 @@ io.on('connection', (socket) => {
   socket.on('decline_rematch', (data) => {
     const { roomId } = data;
     const room = gameRooms.get(roomId);
-    
+
     if (!room) return;
 
     // Find opponent
     const playerIndex = room.players.findIndex(p => p.socket.id === socket.id);
     if (playerIndex === -1) return;
-    
+
     const opponentIndex = 1 - playerIndex;
     const opponentSocket = room.players[opponentIndex].socket;
 
     // Notify opponent
     opponentSocket.emit('rematch_declined');
+
+    // Clear timeout if exists
+    if (rematchTimeouts.has(roomId)) {
+      clearTimeout(rematchTimeouts.get(roomId));
+      rematchTimeouts.delete(roomId);
+    }
 
     // Clean up
     rematchRequests.delete(roomId);
