@@ -25,6 +25,7 @@ const waitingPlayers = new Map();
 const playerSessions = new Map(); // socketId -> userId mapping
 const rematchRequests = new Map(); // roomId -> Set of socketIds who want rematch
 const rematchTimeouts = new Map(); // roomId -> timeout ID for auto-cancel
+const turnTimers = new Map(); // roomId -> timeout ID for turn time limit
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
@@ -251,6 +252,9 @@ async function createGameRoom(gameType, player1, player2) {
   
   // Send initial game state
   io.to(roomId).emit('game_state', getGameState(room));
+
+  // Start turn timer for first player
+  startTurnTimer(room);
 }
 
 // Handle Tic-Tac-Toe move
@@ -274,9 +278,12 @@ function handleTicTacToeMove(room, socket, move) {
   
   room.board[position] = playerIndex === 0 ? 'X' : 'O';
   console.log('Move made:', { position, symbol: room.board[position], newBoard: room.board });
-  
+
+  // Clear turn timer since a valid move was made
+  clearTurnTimer(room.id);
+
   const winner = checkWinner(room.board);
-  
+
   if (winner) {
     handleRoundEnd(room, winner === 'X' ? 0 : 1);
   } else if (room.board.every(cell => cell !== null)) {
@@ -285,6 +292,9 @@ function handleTicTacToeMove(room, socket, move) {
     room.currentPlayer = 1 - room.currentPlayer;
     console.log('Next player turn:', room.currentPlayer);
     io.to(room.id).emit('game_state', getGameState(room));
+
+    // Start timer for next player
+    startTurnTimer(room);
   }
 }
 
@@ -307,42 +317,54 @@ function checkWinner(board) {
 
 // Handle round end
 function handleRoundEnd(room, winnerIndex) {
+  // Clear turn timer
+  clearTurnTimer(room.id);
+
   if (winnerIndex >= 0) {
     room.scores[winnerIndex]++;
   }
-  
+
   room.currentRound++;
-  
+
   console.log('Round ended:', { winnerIndex, scores: room.scores, currentRound: room.currentRound });
-  
+
   if (room.currentRound >= 5 || room.scores[0] >= 3 || room.scores[1] >= 3) {
     handleMatchEnd(room);
   } else {
     // Reset board for next round
     room.board = Array(9).fill(null);
     room.currentPlayer = room.currentRound % 2;
-    
+
     console.log('Starting next round:', { round: room.currentRound + 1, firstPlayer: room.currentPlayer });
-    
+
     io.to(room.id).emit('round_end', {
       winner: winnerIndex,
       scores: room.scores,
       nextRound: room.currentRound + 1
     });
-    
+
     // Start next round after brief delay
     setTimeout(() => {
+      // Check if room still exists before starting new round
+      if (!gameRooms.has(room.id)) return;
+
       console.log('Sending new game state for round:', room.currentRound + 1);
       io.to(room.id).emit('game_state', getGameState(room));
+
+      // Start timer for first player of new round
+      startTurnTimer(room);
     }, 2000);
   }
 }
 
 // Handle match end
 async function handleMatchEnd(room) {
+  // Clear turn timer
+  clearTurnTimer(room.id);
+
   const winnerIndex = room.scores[0] > room.scores[1] ? 0 : room.scores[1] > room.scores[0] ? 1 : -1;
   const duration = Math.floor((Date.now() - room.startTime) / 1000);
-  
+
   io.to(room.id).emit('match_end', {
     winner: winnerIndex,
     finalScores: room.scores
@@ -438,6 +460,38 @@ function getGameState(room) {
   };
 }
 
+// Start turn timer for current player
+function startTurnTimer(room) {
+  // Clear any existing timer
+  clearTurnTimer(room.id);
+
+  const timerId = setTimeout(() => {
+    // Check if room still exists and is still playing
+    if (!gameRooms.has(room.id)) return;
+
+    console.log('Turn timeout for room:', room.id, 'player:', room.currentPlayer);
+
+    // Current player loses the round for timeout
+    const opponentIndex = 1 - room.currentPlayer;
+
+    // Clear the timer
+    clearTurnTimer(room.id);
+
+    // Award round to opponent
+    handleRoundEnd(room, opponentIndex);
+  }, 10000); // 10 seconds
+
+  turnTimers.set(room.id, timerId);
+}
+
+// Clear turn timer
+function clearTurnTimer(roomId) {
+  if (turnTimers.has(roomId)) {
+    clearTimeout(turnTimers.get(roomId));
+    turnTimers.delete(roomId);
+  }
+}
+
 // Handle player disconnect
 function handlePlayerDisconnect(socket) {
   waitingPlayers.forEach((queue, gameType) => {
@@ -446,13 +500,16 @@ function handlePlayerDisconnect(socket) {
       queue.splice(index, 1);
     }
   });
-  
+
   gameRooms.forEach(async (room, roomId) => {
     const playerIndex = room.players.findIndex(p => p.socket.id === socket.id);
     if (playerIndex > -1) {
+      // Clear turn timer
+      clearTurnTimer(roomId);
+
       const opponentIndex = 1 - playerIndex;
       room.players[opponentIndex].socket.emit('opponent_disconnected');
-      
+
       // Award win to remaining player
       const duration = Math.floor((Date.now() - room.startTime) / 1000);
       

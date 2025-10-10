@@ -148,8 +148,8 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
-          alert('Time\'s up! You lost this round.');
-          return 10;
+          // Timer will be handled by server, just keep counting
+          return 0;
         }
         return prev - 1;
       });
