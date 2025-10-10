@@ -18,6 +18,7 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
   const [timeLeft, setTimeLeft] = useState(10);
   const [rematchRequested, setRematchRequested] = useState(false);
   const [opponentWantsRematch, setOpponentWantsRematch] = useState(false);
+  const [rematchDeclined, setRematchDeclined] = useState(false);
 
   useEffect(() => {
     if (!socket) return;
@@ -56,6 +57,7 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
       // Reset rematch states for new game
       setRematchRequested(false);
       setOpponentWantsRematch(false);
+      setRematchDeclined(false);
       // Reset game states
       setBoard(Array(9).fill(null));
       setRound(1);
@@ -109,10 +111,14 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
     });
 
     socket.on('rematch_declined', () => {
-      alert('Opponent declined the rematch');
+      console.log('Opponent declined rematch');
+      setRematchDeclined(true);
       setRematchRequested(false);
       setOpponentWantsRematch(false);
-      onBackToLobby();
+      // Show declined message for 2 seconds then go back to lobby
+      setTimeout(() => {
+        onBackToLobby();
+      }, 2000);
     });
 
     socket.on('rematch_timeout', () => {
@@ -181,9 +187,13 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
 
   const handleRematchDecline = () => {
     socket.emit('decline_rematch', { roomId });
+    setRematchDeclined(true);
     setRematchRequested(false);
     setOpponentWantsRematch(false);
-    onBackToLobby();
+    // Show declined message for 1 second then go back to lobby
+    setTimeout(() => {
+      onBackToLobby();
+    }, 1000);
   };
 
   // Play win sound effect using Web Audio API
@@ -365,7 +375,7 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
             </div>
 
             {/* Rematch Options */}
-            {!rematchRequested && !opponentWantsRematch && (
+            {!rematchRequested && !opponentWantsRematch && !rematchDeclined && (
               <div className="space-y-4">
                 <button
                   onClick={handleRematchRequest}
@@ -382,7 +392,19 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
               </div>
             )}
 
-            {rematchRequested && !opponentWantsRematch && (
+            {rematchDeclined && (
+              <div className="text-center space-y-4">
+                <div className="text-6xl mb-4">❌</div>
+                <div className="text-2xl font-bold text-red-600">
+                  Rematch Declined
+                </div>
+                <p className="text-gray-600">
+                  {opponentName} declined the rematch
+                </p>
+              </div>
+            )}
+
+            {rematchRequested && !opponentWantsRematch && !rematchDeclined && (
               <div className="text-center space-y-4">
                 <div className="text-xl font-bold text-yellow-600">
                   ⏳ Waiting for opponent...
@@ -399,7 +421,7 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
               </div>
             )}
 
-            {opponentWantsRematch && !rematchRequested && (
+            {opponentWantsRematch && !rematchRequested && !rematchDeclined && (
               <div className="space-y-4">
                 <div className="text-center text-xl font-bold text-green-600 mb-4">
                   🎮 {opponentName} wants a rematch!
