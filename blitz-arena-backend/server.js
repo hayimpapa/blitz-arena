@@ -122,22 +122,49 @@ io.on('connection', (socket) => {
     const opponentIndex = 1 - playerIndex;
     const opponentSocket = room.players[opponentIndex].socket;
 
-    // Notify opponent
-    opponentSocket.emit('opponent_wants_rematch');
+    // Check if opponent is still connected
+    if (opponentSocket && opponentSocket.connected) {
+      // Notify opponent
+      opponentSocket.emit('opponent_wants_rematch');
+    } else {
+      // Opponent already disconnected, notify requester immediately
+      socket.emit('rematch_opponent_left');
+      rematchRequests.delete(roomId);
+      gameRooms.delete(roomId);
+      return;
+    }
 
     // Set timeout for auto-cancel if this is the first request
     if (rematchRequests.get(roomId).size === 1) {
       const timeoutId = setTimeout(() => {
         // Check if room and request still exist
-        if (rematchRequests.has(roomId) && rematchRequests.get(roomId).size === 1) {
+        const currentRoom = gameRooms.get(roomId);
+        if (!currentRoom || !rematchRequests.has(roomId)) return;
+
+        if (rematchRequests.get(roomId).size === 1) {
           // Only one player requested - timeout
           console.log('Rematch timeout for room:', roomId);
 
-          // Notify the player who requested
-          socket.emit('rematch_timeout');
+          // Find the requesting player's socket
+          const requestingSocketId = Array.from(rematchRequests.get(roomId))[0];
+          const requestingSocket = io.sockets.sockets.get(requestingSocketId);
 
-          // Notify opponent that requester left
-          opponentSocket.emit('rematch_opponent_left');
+          // Find both players
+          const player1Socket = currentRoom.players[0].socket;
+          const player2Socket = currentRoom.players[1].socket;
+
+          // Notify both players if they're still connected
+          if (requestingSocket && requestingSocket.connected) {
+            requestingSocket.emit('rematch_timeout');
+          }
+
+          // Notify the other player (opponent)
+          if (player1Socket && player1Socket.connected && player1Socket.id !== requestingSocketId) {
+            player1Socket.emit('rematch_opponent_left');
+          }
+          if (player2Socket && player2Socket.connected && player2Socket.id !== requestingSocketId) {
+            player2Socket.emit('rematch_opponent_left');
+          }
 
           // Clean up
           rematchRequests.delete(roomId);
@@ -498,6 +525,32 @@ function handlePlayerDisconnect(socket) {
     const index = queue.findIndex(p => p.socket.id === socket.id);
     if (index > -1) {
       queue.splice(index, 1);
+    }
+  });
+
+  // Handle rematch disconnections
+  rematchRequests.forEach((requests, roomId) => {
+    if (requests.has(socket.id)) {
+      // Player disconnected during rematch waiting
+      const room = gameRooms.get(roomId);
+      if (room) {
+        // Notify opponent that player left
+        room.players.forEach(player => {
+          if (player.socket.id !== socket.id && player.socket.connected) {
+            player.socket.emit('rematch_opponent_left');
+          }
+        });
+      }
+
+      // Clear timeout and cleanup
+      if (rematchTimeouts.has(roomId)) {
+        clearTimeout(rematchTimeouts.get(roomId));
+        rematchTimeouts.delete(roomId);
+      }
+      rematchRequests.delete(roomId);
+      if (room) {
+        gameRooms.delete(roomId);
+      }
     }
   });
 
