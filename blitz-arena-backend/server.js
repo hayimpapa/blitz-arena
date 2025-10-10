@@ -4,6 +4,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const supabase = require('./supabaseClient');
+const ConnectionManager = require('./ConnectionManager');
 
 const app = express();
 const server = http.createServer(app);
@@ -19,13 +20,13 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.json());
 
+// Initialize Connection Manager
+const connectionManager = new ConnectionManager(io);
+
 // Game state management
 const gameRooms = new Map();
 const waitingPlayers = new Map();
-const playerSessions = new Map(); // socketId -> userId mapping
 const rematchRequests = new Map(); // roomId -> Set of socketIds who want rematch
-const rematchTimeouts = new Map(); // roomId -> timeout ID for auto-cancel
-const turnTimers = new Map(); // roomId -> timeout ID for turn time limit
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
@@ -35,8 +36,25 @@ io.on('connection', (socket) => {
   socket.on('authenticate', async (data) => {
     const { userId } = data;
     if (userId) {
-      playerSessions.set(socket.id, userId);
-      console.log('User authenticated:', userId);
+      // Check for reconnection
+      const reconnectData = connectionManager.attemptReconnection(socket, userId);
+      if (reconnectData) {
+        console.log(`Player ${userId} reconnected to room ${reconnectData.roomId}`);
+        const room = gameRooms.get(reconnectData.roomId);
+        if (room) {
+          // Update player socket reference in room
+          const playerIndex = room.players.findIndex(p => p.userId === userId);
+          if (playerIndex !== -1) {
+            room.players[playerIndex].socket = socket;
+            socket.join(reconnectData.roomId);
+            socket.emit('reconnected', { roomId: reconnectData.roomId });
+            socket.emit('game_state', getGameState(room));
+          }
+        }
+      } else {
+        // Normal initialization
+        connectionManager.initializePlayer(socket, userId);
+      }
     }
   });
 
@@ -136,29 +154,23 @@ io.on('connection', (socket) => {
 
     // Set timeout for auto-cancel if this is the first request
     if (rematchRequests.get(roomId).size === 1) {
-      const timeoutId = setTimeout(() => {
-        // Check if room and request still exist
+      connectionManager.startRematchTimer(roomId, 30000, () => {
         const currentRoom = gameRooms.get(roomId);
         if (!currentRoom || !rematchRequests.has(roomId)) return;
 
         if (rematchRequests.get(roomId).size === 1) {
-          // Only one player requested - timeout
           console.log('Rematch timeout for room:', roomId);
 
-          // Find the requesting player's socket
           const requestingSocketId = Array.from(rematchRequests.get(roomId))[0];
           const requestingSocket = io.sockets.sockets.get(requestingSocketId);
 
-          // Find both players
           const player1Socket = currentRoom.players[0].socket;
           const player2Socket = currentRoom.players[1].socket;
 
-          // Notify both players if they're still connected
           if (requestingSocket && requestingSocket.connected) {
             requestingSocket.emit('rematch_timeout');
           }
 
-          // Notify the other player (opponent)
           if (player1Socket && player1Socket.connected && player1Socket.id !== requestingSocketId) {
             player1Socket.emit('rematch_opponent_left');
           }
@@ -166,14 +178,11 @@ io.on('connection', (socket) => {
             player2Socket.emit('rematch_opponent_left');
           }
 
-          // Clean up
           rematchRequests.delete(roomId);
-          rematchTimeouts.delete(roomId);
+          connectionManager.cleanupRoom(roomId);
           gameRooms.delete(roomId);
         }
-      }, 30000); // 30 seconds
-
-      rematchTimeouts.set(roomId, timeoutId);
+      });
     }
 
     // Check if both players want rematch
@@ -184,10 +193,7 @@ io.on('connection', (socket) => {
       const gameType = room.gameType;
 
       // Clear timeout since both accepted
-      if (rematchTimeouts.has(roomId)) {
-        clearTimeout(rematchTimeouts.get(roomId));
-        rematchTimeouts.delete(roomId);
-      }
+      connectionManager.clearRematchTimer(roomId);
 
       // Clean up rematch requests
       rematchRequests.delete(roomId);
@@ -220,13 +226,11 @@ io.on('connection', (socket) => {
     opponentSocket.emit('rematch_declined');
 
     // Clear timeout if exists
-    if (rematchTimeouts.has(roomId)) {
-      clearTimeout(rematchTimeouts.get(roomId));
-      rematchTimeouts.delete(roomId);
-    }
+    connectionManager.clearRematchTimer(roomId);
 
     // Clean up
     rematchRequests.delete(roomId);
+    connectionManager.cleanupRoom(roomId);
     gameRooms.delete(roomId);
   });
 
@@ -234,8 +238,11 @@ io.on('connection', (socket) => {
   // Handle disconnection
   socket.on('disconnect', () => {
     console.log('Player disconnected:', socket.id);
+
+    // Use ConnectionManager to handle disconnect
+    const disconnectInfo = connectionManager.handleDisconnect(socket, false);
+
     handlePlayerDisconnect(socket);
-    playerSessions.delete(socket.id);
     broadcastPlayerCounts();
   });
 });
@@ -257,7 +264,11 @@ async function createGameRoom(gameType, player1, player2) {
   };
   
   gameRooms.set(roomId, room);
-  
+
+  // Register room with ConnectionManager
+  connectionManager.joinRoom(player1.socket.id, roomId);
+  connectionManager.joinRoom(player2.socket.id, roomId);
+
   // Join both players to the room
   player1.socket.join(roomId);
   player2.socket.join(roomId);
@@ -307,7 +318,7 @@ function handleTicTacToeMove(room, socket, move) {
   console.log('Move made:', { position, symbol: room.board[position], newBoard: room.board });
 
   // Clear turn timer since a valid move was made
-  clearTurnTimer(room.id);
+  connectionManager.clearTurnTimer(room.id);
 
   const winner = checkWinner(room.board);
 
@@ -345,7 +356,7 @@ function checkWinner(board) {
 // Handle round end
 function handleRoundEnd(room, winnerIndex) {
   // Clear turn timer
-  clearTurnTimer(room.id);
+  connectionManager.clearTurnTimer(room.id);
 
   if (winnerIndex >= 0) {
     room.scores[winnerIndex]++;
@@ -387,7 +398,7 @@ function handleRoundEnd(room, winnerIndex) {
 // Handle match end
 async function handleMatchEnd(room) {
   // Clear turn timer
-  clearTurnTimer(room.id);
+  connectionManager.clearTurnTimer(room.id);
 
   const winnerIndex = room.scores[0] > room.scores[1] ? 0 : room.scores[1] > room.scores[0] ? 1 : -1;
   const duration = Math.floor((Date.now() - room.startTime) / 1000);
@@ -489,34 +500,20 @@ function getGameState(room) {
 
 // Start turn timer for current player
 function startTurnTimer(room) {
-  // Clear any existing timer
-  clearTurnTimer(room.id);
+  const currentPlayerId = room.players[room.currentPlayer].socket.id;
 
-  const timerId = setTimeout(() => {
-    // Check if room still exists and is still playing
+  connectionManager.startTurnTimer(room.id, currentPlayerId, 10000, (playerId) => {
+    // Check if room still exists
     if (!gameRooms.has(room.id)) return;
 
-    console.log('Turn timeout for room:', room.id, 'player:', room.currentPlayer);
+    console.log('Turn timeout - awarding round to opponent');
 
     // Current player loses the round for timeout
     const opponentIndex = 1 - room.currentPlayer;
 
-    // Clear the timer
-    clearTurnTimer(room.id);
-
     // Award round to opponent
     handleRoundEnd(room, opponentIndex);
-  }, 10000); // 10 seconds
-
-  turnTimers.set(room.id, timerId);
-}
-
-// Clear turn timer
-function clearTurnTimer(roomId) {
-  if (turnTimers.has(roomId)) {
-    clearTimeout(turnTimers.get(roomId));
-    turnTimers.delete(roomId);
-  }
+  });
 }
 
 // Handle player disconnect
@@ -543,12 +540,10 @@ function handlePlayerDisconnect(socket) {
       }
 
       // Clear timeout and cleanup
-      if (rematchTimeouts.has(roomId)) {
-        clearTimeout(rematchTimeouts.get(roomId));
-        rematchTimeouts.delete(roomId);
-      }
+      connectionManager.clearRematchTimer(roomId);
       rematchRequests.delete(roomId);
       if (room) {
+        connectionManager.cleanupRoom(roomId);
         gameRooms.delete(roomId);
       }
     }
@@ -558,7 +553,7 @@ function handlePlayerDisconnect(socket) {
     const playerIndex = room.players.findIndex(p => p.socket.id === socket.id);
     if (playerIndex > -1) {
       // Clear turn timer
-      clearTurnTimer(roomId);
+      connectionManager.clearTurnTimer(roomId);
 
       const opponentIndex = 1 - playerIndex;
       room.players[opponentIndex].socket.emit('opponent_disconnected');
@@ -585,7 +580,8 @@ function handlePlayerDisconnect(socket) {
       } catch (error) {
         console.error('Error saving disconnect match:', error);
       }
-      
+
+      connectionManager.cleanupRoom(roomId);
       gameRooms.delete(roomId);
     }
   });
