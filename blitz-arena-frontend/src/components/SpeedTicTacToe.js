@@ -196,6 +196,14 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
     }, 1000);
   };
 
+  const handleBackToLobby = () => {
+    // If we're leaving from match_end screen, notify server
+    if (gameState === 'match_end' && roomId) {
+      socket.emit('leave_match_end', { roomId });
+    }
+    onBackToLobby();
+  };
+
   // Play win sound effect using Web Audio API
   const playWinSound = () => {
     try {
@@ -384,7 +392,7 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
                   🔄 Play Again
                 </button>
                 <button
-                  onClick={onBackToLobby}
+                  onClick={handleBackToLobby}
                   className="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-4 px-8 rounded-xl transition-colors"
                 >
                   Back to Lobby
@@ -482,7 +490,7 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
         {gameState === 'match_end' && (
           <div className="text-center space-y-4">
             <button
-              onClick={onBackToLobby}
+              onClick={handleBackToLobby}
               className="bg-white text-purple-600 font-bold py-4 px-8 rounded-xl hover:bg-gray-100 transition-colors"
             >
               Back to Lobby

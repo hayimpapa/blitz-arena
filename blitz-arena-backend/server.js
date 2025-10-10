@@ -234,6 +234,37 @@ io.on('connection', (socket) => {
     gameRooms.delete(roomId);
   });
 
+  // Handle player leaving match end screen (cancels pending rematch)
+  socket.on('leave_match_end', (data) => {
+    const { roomId } = data;
+    if (!roomId) return;
+
+    const room = gameRooms.get(roomId);
+    if (!room) return;
+
+    // Check if this player had a pending rematch request
+    const requests = rematchRequests.get(roomId);
+    if (requests && requests.has(socket.id)) {
+      // Player is leaving with a pending rematch request
+      const playerIndex = room.players.findIndex(p => p.socket.id === socket.id);
+      if (playerIndex !== -1) {
+        const opponentIndex = 1 - playerIndex;
+        const opponentSocket = room.players[opponentIndex].socket;
+
+        // Notify opponent that player left
+        if (opponentSocket && opponentSocket.connected) {
+          opponentSocket.emit('rematch_opponent_left');
+        }
+      }
+
+      // Clear timeout and cleanup
+      connectionManager.clearRematchTimer(roomId);
+      rematchRequests.delete(roomId);
+      connectionManager.cleanupRoom(roomId);
+      gameRooms.delete(roomId);
+    }
+  });
+
 
   // Handle disconnection
   socket.on('disconnect', () => {

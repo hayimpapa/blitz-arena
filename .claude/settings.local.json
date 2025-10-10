@@ -6,7 +6,8 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(npx eslint:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(opponent...\" state indefinitely. The cancel only worked if they\nclicked the Cancel button themselves.\n\nChanges:\n\nBackend (server.js):\n- Added new ''leave_match_end'' event handler\n- Detects when a player leaves match_end screen with pending rematch\n- Automatically notifies opponent with ''rematch_opponent_left'' event\n- Cleans up rematch requests and game room properly\n\nFrontend (SpeedTicTacToe.js):\n- Added handleBackToLobby() wrapper function\n- Emits ''leave_match_end'' event when leaving match_end screen\n- Updated both \"Back to Lobby\" buttons to use new handler\n- Ensures proper cleanup when player quits/leaves\n\nFlow:\n1. Player A requests rematch\n2. Player B clicks \"Back to Lobby\" (instead of Accept/Decline)\n3. Frontend emits ''leave_match_end'' event\n4. Backend detects pending rematch from Player A\n5. Backend sends ''rematch_opponent_left'' to Player A\n6. Player A sees \"Opponent left\" alert and returns to lobby\n\nThis also handles cases where opponent:\n- Closes browser/tab\n- Loses connection\n- Navigates away from page\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []
