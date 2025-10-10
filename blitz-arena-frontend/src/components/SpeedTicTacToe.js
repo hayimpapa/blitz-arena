@@ -91,6 +91,11 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
       setWinner(data.winner);
       setScores(data.finalScores);
       setGameState('match_end');
+
+      // Play sound and show animation if player won
+      if (data.winner === playerNumber) {
+        playWinSound();
+      }
     });
 
     socket.on('opponent_disconnected', () => {
@@ -181,6 +186,41 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
     onBackToLobby();
   };
 
+  // Play win sound effect using Web Audio API
+  const playWinSound = () => {
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+      // Create a victory fanfare with multiple notes
+      const notes = [
+        { freq: 523.25, time: 0, duration: 0.15 },    // C5
+        { freq: 659.25, time: 0.15, duration: 0.15 }, // E5
+        { freq: 783.99, time: 0.3, duration: 0.15 },  // G5
+        { freq: 1046.50, time: 0.45, duration: 0.4 }  // C6 (longer)
+      ];
+
+      notes.forEach(note => {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        oscillator.frequency.value = note.freq;
+        oscillator.type = 'triangle';
+
+        gainNode.gain.setValueAtTime(0, audioContext.currentTime + note.time);
+        gainNode.gain.linearRampToValueAtTime(0.3, audioContext.currentTime + note.time + 0.01);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + note.time + note.duration);
+
+        oscillator.start(audioContext.currentTime + note.time);
+        oscillator.stop(audioContext.currentTime + note.time + note.duration);
+      });
+    } catch (error) {
+      console.log('Audio playback not supported:', error);
+    }
+  };
+
   if (gameState === 'matchmaking') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center p-4">
@@ -213,7 +253,33 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
   const opponentScore = scores[1 - playerNumber];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 p-4">
+    <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 p-4 relative">
+      {/* Win Confetti Animation */}
+      {gameState === 'match_end' && winner === playerNumber && (
+        <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
+          {[...Array(50)].map((_, i) => (
+            <div
+              key={i}
+              className="absolute animate-confetti"
+              style={{
+                left: `${Math.random() * 100}%`,
+                top: '-10%',
+                animationDelay: `${Math.random() * 0.5}s`,
+                animationDuration: `${2 + Math.random() * 2}s`
+              }}
+            >
+              <div
+                className="w-3 h-3 rounded-full"
+                style={{
+                  backgroundColor: ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A'][Math.floor(Math.random() * 5)],
+                  transform: `rotate(${Math.random() * 360}deg)`
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="max-w-2xl mx-auto pt-8">
         <div className="bg-white rounded-3xl shadow-2xl p-6 mb-6">
           <div className="flex justify-between items-center mb-4">
@@ -263,6 +329,41 @@ export default function SpeedTicTacToe({ userId, username, onBackToLobby }) {
 
 {gameState === 'match_end' && (
           <div className="bg-white rounded-3xl shadow-2xl p-6">
+            {/* Victory/Defeat Message */}
+            <div className="text-center mb-6">
+              {winner === playerNumber ? (
+                <>
+                  <div className="text-6xl mb-4 animate-bounce">🏆</div>
+                  <h2 className="text-4xl font-bold text-yellow-600 mb-2 animate-pulse">
+                    VICTORY!
+                  </h2>
+                  <p className="text-gray-600 text-lg">
+                    Final Score: {myScore} - {opponentScore}
+                  </p>
+                </>
+              ) : winner === -1 ? (
+                <>
+                  <div className="text-6xl mb-4">🤝</div>
+                  <h2 className="text-4xl font-bold text-gray-600 mb-2">
+                    DRAW!
+                  </h2>
+                  <p className="text-gray-600 text-lg">
+                    Final Score: {myScore} - {opponentScore}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="text-6xl mb-4">😔</div>
+                  <h2 className="text-4xl font-bold text-red-600 mb-2">
+                    DEFEAT
+                  </h2>
+                  <p className="text-gray-600 text-lg">
+                    Final Score: {myScore} - {opponentScore}
+                  </p>
+                </>
+              )}
+            </div>
+
             {/* Rematch Options */}
             {!rematchRequested && !opponentWantsRematch && (
               <div className="space-y-4">
