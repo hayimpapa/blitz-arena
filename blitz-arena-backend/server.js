@@ -708,18 +708,23 @@ app.get('/api/leaderboard-points/:gameType', async (req, res) => {
       `)
       .eq('game_type', gameType)
       .order('points', { ascending: false })
+      .order('wins', { ascending: false })
       .limit(100);
 
     if (error) throw error;
 
-    const leaderboard = data.map(stat => ({
-      username: stat.profiles?.username || 'Unknown',
-      points: stat.points || 0,
-      wins: stat.wins,
-      draws: stat.draws || 0,
-      losses: stat.losses,
-      gamesPlayed: stat.games_played
-    }));
+    // Filter out guest users and limit to top 10
+    const leaderboard = data
+      .filter(stat => !stat.user_id.startsWith('guest_'))
+      .slice(0, 10)
+      .map(stat => ({
+        username: stat.profiles?.username || 'Unknown',
+        points: stat.points || 0,
+        wins: stat.wins,
+        draws: stat.draws || 0,
+        losses: stat.losses,
+        gamesPlayed: stat.games_played
+      }));
 
     res.json(leaderboard);
   } catch (error) {
@@ -740,11 +745,17 @@ app.get('/api/leaderboard-all-games', async (req, res) => {
 
     if (error) throw error;
 
-    // Aggregate stats by user
+    // Aggregate stats by user (excluding guests)
     const userMap = new Map();
 
     data.forEach(stat => {
       const userId = stat.user_id;
+
+      // Skip guest users
+      if (userId.startsWith('guest_')) {
+        return;
+      }
+
       const username = stat.profiles?.username || 'Unknown';
 
       if (!userMap.has(userId)) {
@@ -766,10 +777,16 @@ app.get('/api/leaderboard-all-games', async (req, res) => {
       userStats.gamesPlayed += stat.games_played;
     });
 
-    // Convert map to array and sort by points
+    // Convert map to array and sort by points, limit to top 10
     const leaderboard = Array.from(userMap.values())
-      .sort((a, b) => b.points - a.points)
-      .slice(0, 100);
+      .sort((a, b) => {
+        // Sort by points first, then by wins as tiebreaker
+        if (b.points !== a.points) {
+          return b.points - a.points;
+        }
+        return b.wins - a.wins;
+      })
+      .slice(0, 10);
 
     res.json(leaderboard);
   } catch (error) {
