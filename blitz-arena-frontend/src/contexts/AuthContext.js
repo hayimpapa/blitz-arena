@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { generateGuestName, generateGuestId } from '@/lib/guestNames';
 
 const AuthContext = createContext();
 
@@ -15,7 +16,26 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check active session
+    // Check for guest session in localStorage first
+    const guestSession = localStorage.getItem('guestSession');
+    if (guestSession) {
+      try {
+        const guestData = JSON.parse(guestSession);
+        setUser({ id: guestData.id });
+        setProfile({
+          id: guestData.id,
+          username: guestData.username,
+          isGuest: true
+        });
+        setLoading(false);
+        return;
+      } catch (error) {
+        console.error('Error parsing guest session:', error);
+        localStorage.removeItem('guestSession');
+      }
+    }
+
+    // Check active Supabase session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
@@ -89,8 +109,41 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const signInAsGuest = () => {
+    const guestId = generateGuestId();
+    const guestName = generateGuestName();
+
+    const guestData = {
+      id: guestId,
+      username: guestName
+    };
+
+    // Store in localStorage for session persistence
+    localStorage.setItem('guestSession', JSON.stringify(guestData));
+
+    // Set user and profile state
+    setUser({ id: guestId });
+    setProfile({
+      id: guestId,
+      username: guestName,
+      isGuest: true
+    });
+
+    return { data: guestData, error: null };
+  };
+
   const signOut = async () => {
     try {
+      // Check if this is a guest session
+      const guestSession = localStorage.getItem('guestSession');
+      if (guestSession) {
+        localStorage.removeItem('guestSession');
+        setUser(null);
+        setProfile(null);
+        return;
+      }
+
+      // Otherwise sign out from Supabase
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
     } catch (error) {
@@ -104,6 +157,7 @@ export function AuthProvider({ children }) {
     loading,
     signUp,
     signIn,
+    signInAsGuest,
     signOut
   };
 

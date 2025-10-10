@@ -413,17 +413,24 @@ async function handleMatchEnd(room) {
     const player1Id = room.players[0].userId;
     const player2Id = room.players[1].userId;
     const winnerId = winnerIndex >= 0 ? room.players[winnerIndex].userId : null;
-    
-    // Save match history
-    await supabase.from('match_history').insert({
-      game_type: room.gameType,
-      player1_id: player1Id,
-      player2_id: player2Id,
-      winner_id: winnerId,
-      player1_score: room.scores[0],
-      player2_score: room.scores[1],
-      duration_seconds: duration
-    });
+
+    // Skip database saving for guest users
+    const hasGuestPlayer = player1Id.startsWith('guest_') || player2Id.startsWith('guest_');
+
+    if (!hasGuestPlayer) {
+      // Save match history
+      await supabase.from('match_history').insert({
+        game_type: room.gameType,
+        player1_id: player1Id,
+        player2_id: player2Id,
+        winner_id: winnerId,
+        player1_score: room.scores[0],
+        player2_score: room.scores[1],
+        duration_seconds: duration
+      });
+    } else {
+      console.log('Skipping match history for game with guest player(s)');
+    }
     
     // Update player stats - only if not a draw
     if (winnerIndex >= 0) {
@@ -448,6 +455,12 @@ async function handleMatchEnd(room) {
 // Update player statistics in database
 async function updatePlayerStats(userId, gameType, won, roundsWon, roundsLost) {
   try {
+    // Skip stats saving for guest users
+    if (userId.startsWith('guest_')) {
+      console.log(`Skipping stats for guest user: ${userId}`);
+      return;
+    }
+
     // Get existing stats
     const { data: existingStats } = await supabase
       .from('game_stats')
@@ -564,17 +577,24 @@ function handlePlayerDisconnect(socket) {
       try {
         const winnerId = room.players[opponentIndex].userId;
         const loserId = room.players[playerIndex].userId;
-        
-        await supabase.from('match_history').insert({
-          game_type: room.gameType,
-          player1_id: room.players[0].userId,
-          player2_id: room.players[1].userId,
-          winner_id: winnerId,
-          player1_score: playerIndex === 0 ? 0 : 5,
-          player2_score: playerIndex === 1 ? 0 : 5,
-          duration_seconds: duration
-        });
-        
+
+        // Skip database saving for guest users
+        const hasGuestPlayer = winnerId.startsWith('guest_') || loserId.startsWith('guest_');
+
+        if (!hasGuestPlayer) {
+          await supabase.from('match_history').insert({
+            game_type: room.gameType,
+            player1_id: room.players[0].userId,
+            player2_id: room.players[1].userId,
+            winner_id: winnerId,
+            player1_score: playerIndex === 0 ? 0 : 5,
+            player2_score: playerIndex === 1 ? 0 : 5,
+            duration_seconds: duration
+          });
+        } else {
+          console.log('Skipping disconnect match history for game with guest player(s)');
+        }
+
         await updatePlayerStats(winnerId, room.gameType, true, 5, 0);
         await updatePlayerStats(loserId, room.gameType, false, 0, 5);
       } catch (error) {

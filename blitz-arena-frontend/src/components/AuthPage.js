@@ -11,7 +11,7 @@ export default function AuthPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, signInAsGuest } = useAuth();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -28,7 +28,7 @@ export default function AuthPage() {
         if (username.length < 3 || username.length > 20) {
           throw new Error('Username must be 3-20 characters');
         }
-        
+
         const { error } = await signUp(email, password, username);
         if (error) throw error;
       }
@@ -37,6 +37,11 @@ export default function AuthPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleGuestLogin = () => {
+    setError('');
+    signInAsGuest();
   };
 
   return (
@@ -113,6 +118,25 @@ export default function AuthPage() {
             {loading ? 'Please wait...' : isLogin ? 'Sign In' : 'Create Account'}
           </button>
         </form>
+
+        <div className="mt-4">
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-300"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 bg-white text-gray-500">OR</span>
+            </div>
+          </div>
+
+          <button
+            onClick={handleGuestLogin}
+            disabled={loading}
+            className="mt-4 w-full bg-gray-100 text-gray-800 font-bold py-4 rounded-xl hover:bg-gray-200 transition-colors disabled:bg-gray-300 border-2 border-gray-300"
+          >
+            Continue as Guest
+          </button>
+        </div>
 
         <div className="mt-6 text-center">
           <button
