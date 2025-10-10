@@ -7,18 +7,26 @@ export default function Leaderboard({ onBack }) {
   const [leaderboard, setLeaderboard] = useState([]);
   const [userStats, setUserStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('all'); // 'all' or 'tictactoe'
   const { user, profile } = useAuth();
 
   useEffect(() => {
     fetchLeaderboard();
-    if (user) {
+    if (user && !profile?.isGuest) {
       fetchUserStats();
     }
-  }, [user]);
+  }, [user, activeTab]);
 
   const fetchLeaderboard = async () => {
+    setLoading(true);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/leaderboard/speedTicTacToe`);
+      let url;
+      if (activeTab === 'all') {
+        url = `${process.env.NEXT_PUBLIC_API_URL}/api/leaderboard-all-games`;
+      } else {
+        url = `${process.env.NEXT_PUBLIC_API_URL}/api/leaderboard-points/speedTicTacToe`;
+      }
+      const response = await fetch(url);
       const data = await response.json();
       setLeaderboard(data);
     } catch (error) {
@@ -30,7 +38,13 @@ export default function Leaderboard({ onBack }) {
 
   const fetchUserStats = async () => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/user-stats/${user.id}/speedTicTacToe`);
+      let url;
+      if (activeTab === 'all') {
+        url = `${process.env.NEXT_PUBLIC_API_URL}/api/user-stats-all/${user.id}`;
+      } else {
+        url = `${process.env.NEXT_PUBLIC_API_URL}/api/user-stats/${user.id}/speedTicTacToe`;
+      }
+      const response = await fetch(url);
       const data = await response.json();
       setUserStats(data);
     } catch (error) {
@@ -59,14 +73,46 @@ export default function Leaderboard({ onBack }) {
           <div className="w-20"></div>
         </div>
 
+        {/* Tabs */}
+        <div className="flex gap-2 mb-6">
+          <button
+            onClick={() => setActiveTab('all')}
+            className={`flex-1 py-3 px-6 rounded-xl font-bold transition-all ${
+              activeTab === 'all'
+                ? 'bg-white text-purple-600 shadow-xl'
+                : 'bg-purple-500 bg-opacity-50 text-white hover:bg-opacity-70'
+            }`}
+          >
+            All Games
+          </button>
+          <button
+            onClick={() => setActiveTab('tictactoe')}
+            className={`flex-1 py-3 px-6 rounded-xl font-bold transition-all ${
+              activeTab === 'tictactoe'
+                ? 'bg-white text-purple-600 shadow-xl'
+                : 'bg-purple-500 bg-opacity-50 text-white hover:bg-opacity-70'
+            }`}
+          >
+            Tic-Tac-Toe
+          </button>
+        </div>
+
         {/* User Stats Card */}
-        {userStats && (
+        {userStats && !profile?.isGuest && (
           <div className="bg-white rounded-3xl shadow-2xl p-6 mb-6">
             <h2 className="text-xl font-bold text-gray-800 mb-4">Your Stats</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <div className="text-center">
-                <div className="text-3xl font-bold text-purple-600">{userStats.wins}</div>
+                <div className="text-3xl font-bold text-yellow-600">{userStats.points || 0}</div>
+                <div className="text-sm text-gray-600">Points</div>
+              </div>
+              <div className="text-center">
+                <div className="text-3xl font-bold text-green-600">{userStats.wins}</div>
                 <div className="text-sm text-gray-600">Wins</div>
+              </div>
+              <div className="text-center">
+                <div className="text-3xl font-bold text-gray-600">{userStats.draws || 0}</div>
+                <div className="text-sm text-gray-600">Draws</div>
               </div>
               <div className="text-center">
                 <div className="text-3xl font-bold text-red-600">{userStats.losses}</div>
@@ -76,21 +122,15 @@ export default function Leaderboard({ onBack }) {
                 <div className="text-3xl font-bold text-blue-600">{userStats.games_played}</div>
                 <div className="text-sm text-gray-600">Total Games</div>
               </div>
-              <div className="text-center">
-                <div className="text-3xl font-bold text-green-600">
-                  {userStats.games_played > 0 
-                    ? ((userStats.wins / userStats.games_played) * 100).toFixed(1)
-                    : '0.0'}%
-                </div>
-                <div className="text-sm text-gray-600">Win Rate</div>
-              </div>
             </div>
           </div>
         )}
 
         {/* Leaderboard */}
         <div className="bg-white rounded-3xl shadow-2xl p-6">
-          <h2 className="text-2xl font-bold text-gray-800 mb-6">Top Players</h2>
+          <h2 className="text-2xl font-bold text-gray-800 mb-6">
+            Top Players {activeTab === 'all' ? '- All Games' : '- Tic-Tac-Toe'}
+          </h2>
           
           {loading ? (
             <div className="text-center py-8 text-gray-500">Loading...</div>
@@ -121,13 +161,13 @@ export default function Leaderboard({ onBack }) {
                         )}
                       </div>
                       <div className="text-sm text-gray-600">
-                        {player.gamesPlayed} games • {player.winRate}% win rate
+                        {player.gamesPlayed} games • W:{player.wins} D:{player.draws} L:{player.losses}
                       </div>
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-2xl font-bold text-purple-600">{player.wins}</div>
-                    <div className="text-xs text-gray-500">wins</div>
+                    <div className="text-3xl font-bold text-yellow-600">{player.points}</div>
+                    <div className="text-xs text-gray-500">points</div>
                   </div>
                 </div>
               ))}

@@ -461,6 +461,16 @@ async function updatePlayerStats(userId, gameType, won, roundsWon, roundsLost) {
       return;
     }
 
+    // Calculate points: win = 2, draw = 1, loss = 0
+    let pointsEarned = 0;
+    let draws = 0;
+    if (won === true) {
+      pointsEarned = 2;
+    } else if (won === null) {
+      pointsEarned = 1;
+      draws = 1;
+    }
+
     // Get existing stats
     const { data: existingStats } = await supabase
       .from('game_stats')
@@ -468,17 +478,19 @@ async function updatePlayerStats(userId, gameType, won, roundsWon, roundsLost) {
       .eq('user_id', userId)
       .eq('game_type', gameType)
       .single();
-    
+
     if (existingStats) {
       // Update existing stats
       await supabase
         .from('game_stats')
         .update({
-          wins: existingStats.wins + (won ? 1 : 0),
-          losses: existingStats.losses + (won ? 0 : 1),
+          wins: existingStats.wins + (won === true ? 1 : 0),
+          losses: existingStats.losses + (won === false ? 1 : 0),
+          draws: (existingStats.draws || 0) + draws,
           games_played: existingStats.games_played + 1,
           total_rounds_won: existingStats.total_rounds_won + roundsWon,
-          total_rounds_lost: existingStats.total_rounds_lost + roundsLost
+          total_rounds_lost: existingStats.total_rounds_lost + roundsLost,
+          points: (existingStats.points || 0) + pointsEarned
         })
         .eq('user_id', userId)
         .eq('game_type', gameType);
@@ -489,11 +501,13 @@ async function updatePlayerStats(userId, gameType, won, roundsWon, roundsLost) {
         .insert({
           user_id: userId,
           game_type: gameType,
-          wins: won ? 1 : 0,
-          losses: won ? 0 : 1,
+          wins: won === true ? 1 : 0,
+          losses: won === false ? 1 : 0,
+          draws: draws,
           games_played: 1,
           total_rounds_won: roundsWon,
-          total_rounds_lost: roundsLost
+          total_rounds_lost: roundsLost,
+          points: pointsEarned
         });
     }
   } catch (error) {
@@ -656,25 +670,148 @@ app.get('/api/leaderboard/:gameType', async (req, res) => {
 app.get('/api/user-stats/:userId/:gameType', async (req, res) => {
   try {
     const { userId, gameType } = req.params;
-    
+
     const { data, error } = await supabase
       .from('game_stats')
       .select('*')
       .eq('user_id', userId)
       .eq('game_type', gameType)
       .single();
-    
+
     if (error && error.code !== 'PGRST116') throw error;
-    
+
     res.json(data || {
       wins: 0,
+      losses: 0,
+      draws: 0,
+      games_played: 0,
+      total_rounds_won: 0,
+      total_rounds_lost: 0,
+      points: 0
+    });
+  } catch (error) {
+    console.error('Error fetching user stats:', error);
+    res.status(500).json({ error: 'Failed to fetch user stats' });
+  }
+});
+
+// Points-based leaderboard for specific game type
+app.get('/api/leaderboard-points/:gameType', async (req, res) => {
+  try {
+    const { gameType } = req.params;
+
+    const { data, error } = await supabase
+      .from('game_stats')
+      .select(`
+        *,
+        profiles:user_id (username)
+      `)
+      .eq('game_type', gameType)
+      .order('points', { ascending: false })
+      .limit(100);
+
+    if (error) throw error;
+
+    const leaderboard = data.map(stat => ({
+      username: stat.profiles?.username || 'Unknown',
+      points: stat.points || 0,
+      wins: stat.wins,
+      draws: stat.draws || 0,
+      losses: stat.losses,
+      gamesPlayed: stat.games_played
+    }));
+
+    res.json(leaderboard);
+  } catch (error) {
+    console.error('Error fetching points leaderboard:', error);
+    res.status(500).json({ error: 'Failed to fetch leaderboard' });
+  }
+});
+
+// All-time all-games leaderboard (aggregated across all game types)
+app.get('/api/leaderboard-all-games', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('game_stats')
+      .select(`
+        *,
+        profiles:user_id (username)
+      `);
+
+    if (error) throw error;
+
+    // Aggregate stats by user
+    const userMap = new Map();
+
+    data.forEach(stat => {
+      const userId = stat.user_id;
+      const username = stat.profiles?.username || 'Unknown';
+
+      if (!userMap.has(userId)) {
+        userMap.set(userId, {
+          username,
+          points: 0,
+          wins: 0,
+          draws: 0,
+          losses: 0,
+          gamesPlayed: 0
+        });
+      }
+
+      const userStats = userMap.get(userId);
+      userStats.points += (stat.points || 0);
+      userStats.wins += stat.wins;
+      userStats.draws += (stat.draws || 0);
+      userStats.losses += stat.losses;
+      userStats.gamesPlayed += stat.games_played;
+    });
+
+    // Convert map to array and sort by points
+    const leaderboard = Array.from(userMap.values())
+      .sort((a, b) => b.points - a.points)
+      .slice(0, 100);
+
+    res.json(leaderboard);
+  } catch (error) {
+    console.error('Error fetching all-games leaderboard:', error);
+    res.status(500).json({ error: 'Failed to fetch leaderboard' });
+  }
+});
+
+// Get aggregated user stats across all games
+app.get('/api/user-stats-all/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const { data, error } = await supabase
+      .from('game_stats')
+      .select('*')
+      .eq('user_id', userId);
+
+    if (error) throw error;
+
+    // Aggregate all stats
+    const aggregated = data.reduce((acc, stat) => ({
+      points: acc.points + (stat.points || 0),
+      wins: acc.wins + stat.wins,
+      draws: acc.draws + (stat.draws || 0),
+      losses: acc.losses + stat.losses,
+      games_played: acc.games_played + stat.games_played,
+      total_rounds_won: acc.total_rounds_won + stat.total_rounds_won,
+      total_rounds_lost: acc.total_rounds_lost + stat.total_rounds_lost
+    }), {
+      points: 0,
+      wins: 0,
+      draws: 0,
       losses: 0,
       games_played: 0,
       total_rounds_won: 0,
       total_rounds_lost: 0
     });
+
+    res.json(aggregated);
   } catch (error) {
-    console.error('Error fetching user stats:', error);
+    console.error('Error fetching aggregated user stats:', error);
     res.status(500).json({ error: 'Failed to fetch user stats' });
   }
 });
