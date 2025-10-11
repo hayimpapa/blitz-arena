@@ -61,9 +61,12 @@ io.on('connection', (socket) => {
   // Send current online player counts
   socket.on('request_player_counts', () => {
     const counts = {
-      speedTicTacToe: (waitingPlayers.get('speedTicTacToe')?.length || 0) + 
-                      (Array.from(gameRooms.values()).filter(room => 
-                        room.gameType === 'speedTicTacToe' && room.status === 'playing').length * 2)
+      speedTicTacToe: (waitingPlayers.get('speedTicTacToe')?.length || 0) +
+                      (Array.from(gameRooms.values()).filter(room =>
+                        room.gameType === 'speedTicTacToe' && room.status === 'playing').length * 2),
+      nineMensMorris: (waitingPlayers.get('nineMensMorris')?.length || 0) +
+                      (Array.from(gameRooms.values()).filter(room =>
+                        room.gameType === 'nineMensMorris' && room.status === 'playing').length * 2)
     };
     socket.emit('player_counts', counts);
   });
@@ -108,11 +111,13 @@ io.on('connection', (socket) => {
   socket.on('game_move', (data) => {
     const { roomId, move } = data;
     const room = gameRooms.get(roomId);
-    
+
     if (!room) return;
-    
+
     if (room.gameType === 'speedTicTacToe') {
       handleTicTacToeMove(room, socket, move);
+    } else if (room.gameType === 'nineMensMorris') {
+      handleNineMensMorrisMove(room, socket, move);
     }
   });
 // Handle rematch request
@@ -281,19 +286,39 @@ io.on('connection', (socket) => {
 // Create a new game room
 async function createGameRoom(gameType, player1, player2) {
   const roomId = `${gameType}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  
-  const room = {
-    id: roomId,
-    gameType,
-    players: [player1, player2],
-    currentRound: 0,
-    scores: [0, 0],
-    currentPlayer: 0,
-    board: Array(9).fill(null),
-    status: 'playing',
-    startTime: Date.now()
-  };
-  
+
+  let room;
+
+  if (gameType === 'speedTicTacToe') {
+    room = {
+      id: roomId,
+      gameType,
+      players: [player1, player2],
+      currentRound: 0,
+      scores: [0, 0],
+      currentPlayer: 0,
+      board: Array(9).fill(null),
+      status: 'playing',
+      startTime: Date.now()
+    };
+  } else if (gameType === 'nineMensMorris') {
+    room = {
+      id: roomId,
+      gameType,
+      players: [player1, player2],
+      currentRound: 0,
+      scores: [0, 0],
+      currentPlayer: 0,
+      board: Array(24).fill(null), // 24 positions on the board
+      piecesInHand: [9, 9], // Each player starts with 9 pieces to place
+      piecesOnBoard: [0, 0], // Track pieces on board
+      phase: 'placement', // 'placement', 'movement', or 'removal'
+      millFormed: false, // Track if current player just formed a mill
+      status: 'playing',
+      startTime: Date.now()
+    };
+  }
+
   gameRooms.set(roomId, room);
 
   // Register room with ConnectionManager
@@ -303,22 +328,22 @@ async function createGameRoom(gameType, player1, player2) {
   // Join both players to the room
   player1.socket.join(roomId);
   player2.socket.join(roomId);
-  
+
   // Notify players
   player1.socket.emit('game_start', {
     roomId,
     playerNumber: 0,
     opponent: player2.playerName,
-    symbol: 'X'
+    symbol: gameType === 'speedTicTacToe' ? 'X' : 'W' // W for white
   });
-  
+
   player2.socket.emit('game_start', {
     roomId,
     playerNumber: 1,
     opponent: player1.playerName,
-    symbol: 'O'
+    symbol: gameType === 'speedTicTacToe' ? 'O' : 'B' // B for black
   });
-  
+
   // Send initial game state
   io.to(roomId).emit('game_state', getGameState(room));
 
@@ -374,7 +399,7 @@ function checkWinner(board) {
     [0, 3, 6], [1, 4, 7], [2, 5, 8],
     [0, 4, 8], [2, 4, 6]
   ];
-  
+
   for (let line of lines) {
     const [a, b, c] = line;
     if (board[a] && board[a] === board[b] && board[a] === board[c]) {
@@ -382,6 +407,217 @@ function checkWinner(board) {
     }
   }
   return null;
+}
+
+// Nine Men's Morris adjacency map (24 positions)
+const morrisAdjacency = {
+  0: [1, 9], 1: [0, 2, 4], 2: [1, 14],
+  3: [4, 10], 4: [1, 3, 5, 7], 5: [4, 13],
+  6: [7, 11], 7: [4, 6, 8], 8: [7, 12],
+  9: [0, 10, 21], 10: [3, 9, 11, 18], 11: [6, 10, 15],
+  12: [8, 13, 17], 13: [5, 12, 14, 20], 14: [2, 13, 23],
+  15: [11, 16], 16: [15, 17, 19], 17: [12, 16],
+  18: [10, 19], 19: [16, 18, 20, 22], 20: [13, 19],
+  21: [9, 22], 22: [19, 21, 23], 23: [14, 22]
+};
+
+// Nine Men's Morris mill patterns
+const morrisMills = [
+  [0, 1, 2], [3, 4, 5], [6, 7, 8],
+  [9, 10, 11], [12, 13, 14], [15, 16, 17],
+  [18, 19, 20], [21, 22, 23],
+  [0, 9, 21], [3, 10, 18], [6, 11, 15],
+  [1, 4, 7], [16, 19, 22],
+  [8, 12, 17], [5, 13, 20], [2, 14, 23]
+];
+
+// Handle Nine Men's Morris move
+function handleNineMensMorrisMove(room, socket, move) {
+  const playerIndex = room.players.findIndex(p => p.socket.id === socket.id);
+
+  if (playerIndex !== room.currentPlayer) {
+    socket.emit('invalid_move', { reason: 'Not your turn' });
+    return;
+  }
+
+  connectionManager.clearTurnTimer(room.id);
+
+  const symbol = playerIndex === 0 ? 'W' : 'B';
+
+  // Handle removal phase (after forming a mill)
+  if (room.phase === 'removal') {
+    const { position } = move;
+    const opponentSymbol = playerIndex === 0 ? 'B' : 'W';
+
+    // Validate removal
+    if (room.board[position] !== opponentSymbol) {
+      socket.emit('invalid_move', { reason: 'Must remove opponent piece' });
+      startTurnTimer(room);
+      return;
+    }
+
+    // Check if piece is in a mill (can only remove if no other pieces available)
+    const isInMill = isPositionInMill(room.board, position, opponentSymbol);
+    const hasNonMillPieces = hasNonMillPiecesAvailable(room.board, opponentSymbol);
+
+    if (isInMill && hasNonMillPieces) {
+      socket.emit('invalid_move', { reason: 'Cannot remove piece from mill' });
+      startTurnTimer(room);
+      return;
+    }
+
+    // Remove piece
+    room.board[position] = null;
+    room.piecesOnBoard[1 - playerIndex]--;
+
+    // Check win condition
+    if (room.piecesOnBoard[1 - playerIndex] < 3 && room.piecesInHand[1 - playerIndex] === 0) {
+      handleRoundEnd(room, playerIndex);
+      return;
+    }
+
+    // Switch back to placement or movement
+    if (room.piecesInHand[0] > 0 || room.piecesInHand[1] > 0) {
+      room.phase = 'placement';
+    } else {
+      room.phase = 'movement';
+    }
+
+    room.millFormed = false;
+    room.currentPlayer = 1 - room.currentPlayer;
+    io.to(room.id).emit('game_state', getGameState(room));
+    startTurnTimer(room);
+    return;
+  }
+
+  // Placement phase
+  if (room.phase === 'placement') {
+    const { position } = move;
+
+    if (room.board[position] !== null) {
+      socket.emit('invalid_move', { reason: 'Position occupied' });
+      startTurnTimer(room);
+      return;
+    }
+
+    room.board[position] = symbol;
+    room.piecesInHand[playerIndex]--;
+    room.piecesOnBoard[playerIndex]++;
+
+    // Check if mill formed
+    if (isPositionInMill(room.board, position, symbol)) {
+      room.phase = 'removal';
+      room.millFormed = true;
+      io.to(room.id).emit('game_state', getGameState(room));
+      startTurnTimer(room);
+      return;
+    }
+
+    // Check if placement phase is over
+    if (room.piecesInHand[0] === 0 && room.piecesInHand[1] === 0) {
+      room.phase = 'movement';
+    }
+
+    room.currentPlayer = 1 - room.currentPlayer;
+    io.to(room.id).emit('game_state', getGameState(room));
+    startTurnTimer(room);
+    return;
+  }
+
+  // Movement phase
+  if (room.phase === 'movement') {
+    const { from, to } = move;
+
+    if (room.board[from] !== symbol) {
+      socket.emit('invalid_move', { reason: 'Not your piece' });
+      startTurnTimer(room);
+      return;
+    }
+
+    if (room.board[to] !== null) {
+      socket.emit('invalid_move', { reason: 'Position occupied' });
+      startTurnTimer(room);
+      return;
+    }
+
+    // Check if move is valid (adjacent or flying)
+    const canFly = room.piecesOnBoard[playerIndex] === 3;
+    if (!canFly && !morrisAdjacency[from].includes(to)) {
+      socket.emit('invalid_move', { reason: 'Invalid move' });
+      startTurnTimer(room);
+      return;
+    }
+
+    // Make move
+    room.board[from] = null;
+    room.board[to] = symbol;
+
+    // Check if mill formed
+    if (isPositionInMill(room.board, to, symbol)) {
+      room.phase = 'removal';
+      room.millFormed = true;
+      io.to(room.id).emit('game_state', getGameState(room));
+      startTurnTimer(room);
+      return;
+    }
+
+    // Check if opponent can move
+    const opponentIndex = 1 - playerIndex;
+    const opponentSymbol = opponentIndex === 0 ? 'W' : 'B';
+    const opponentCanFly = room.piecesOnBoard[opponentIndex] === 3;
+
+    if (!canOpponentMove(room.board, opponentSymbol, opponentCanFly)) {
+      // Opponent cannot move - current player wins
+      handleRoundEnd(room, playerIndex);
+      return;
+    }
+
+    room.currentPlayer = 1 - room.currentPlayer;
+    io.to(room.id).emit('game_state', getGameState(room));
+    startTurnTimer(room);
+  }
+}
+
+// Check if a position is part of a mill
+function isPositionInMill(board, position, symbol) {
+  for (let mill of morrisMills) {
+    if (mill.includes(position)) {
+      if (board[mill[0]] === symbol && board[mill[1]] === symbol && board[mill[2]] === symbol) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Check if player has pieces not in mills
+function hasNonMillPiecesAvailable(board, symbol) {
+  for (let i = 0; i < board.length; i++) {
+    if (board[i] === symbol && !isPositionInMill(board, i, symbol)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Check if opponent can make any valid move
+function canOpponentMove(board, symbol, canFly) {
+  for (let i = 0; i < board.length; i++) {
+    if (board[i] === symbol) {
+      if (canFly) {
+        // Can fly to any empty position
+        for (let j = 0; j < board.length; j++) {
+          if (board[j] === null) return true;
+        }
+      } else {
+        // Check adjacent positions
+        for (let adj of morrisAdjacency[i]) {
+          if (board[adj] === null) return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 // Handle round end
@@ -401,7 +637,16 @@ function handleRoundEnd(room, winnerIndex) {
     handleMatchEnd(room);
   } else {
     // Reset board for next round
-    room.board = Array(9).fill(null);
+    if (room.gameType === 'speedTicTacToe') {
+      room.board = Array(9).fill(null);
+    } else if (room.gameType === 'nineMensMorris') {
+      room.board = Array(24).fill(null);
+      room.piecesInHand = [9, 9];
+      room.piecesOnBoard = [0, 0];
+      room.phase = 'placement';
+      room.millFormed = false;
+    }
+
     room.currentPlayer = room.currentRound % 2;
 
     console.log('Starting next round:', { round: room.currentRound + 1, firstPlayer: room.currentPlayer });
@@ -548,12 +793,25 @@ async function updatePlayerStats(userId, gameType, won, roundsWon, roundsLost) {
 
 // Get current game state
 function getGameState(room) {
-  return {
-    board: room.board,
-    currentPlayer: room.currentPlayer,
-    scores: room.scores,
-    round: room.currentRound + 1
-  };
+  if (room.gameType === 'speedTicTacToe') {
+    return {
+      board: room.board,
+      currentPlayer: room.currentPlayer,
+      scores: room.scores,
+      round: room.currentRound + 1
+    };
+  } else if (room.gameType === 'nineMensMorris') {
+    return {
+      board: room.board,
+      currentPlayer: room.currentPlayer,
+      scores: room.scores,
+      round: room.currentRound + 1,
+      piecesInHand: room.piecesInHand,
+      piecesOnBoard: room.piecesOnBoard,
+      phase: room.phase,
+      millFormed: room.millFormed
+    };
+  }
 }
 
 // Start turn timer for current player
@@ -655,9 +913,12 @@ function handlePlayerDisconnect(socket) {
 // Broadcast player counts
 function broadcastPlayerCounts() {
   const counts = {
-    speedTicTacToe: (waitingPlayers.get('speedTicTacToe')?.length || 0) + 
-                    (Array.from(gameRooms.values()).filter(room => 
-                      room.gameType === 'speedTicTacToe' && room.status === 'playing').length * 2)
+    speedTicTacToe: (waitingPlayers.get('speedTicTacToe')?.length || 0) +
+                    (Array.from(gameRooms.values()).filter(room =>
+                      room.gameType === 'speedTicTacToe' && room.status === 'playing').length * 2),
+    nineMensMorris: (waitingPlayers.get('nineMensMorris')?.length || 0) +
+                    (Array.from(gameRooms.values()).filter(room =>
+                      room.gameType === 'nineMensMorris' && room.status === 'playing').length * 2)
   };
   io.emit('player_counts', counts);
 }

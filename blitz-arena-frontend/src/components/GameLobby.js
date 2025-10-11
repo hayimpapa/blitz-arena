@@ -6,7 +6,8 @@ import { useSocket } from '@/contexts/SocketContext';
 export default function GameLobby({ onGameSelect, onViewLeaderboard, username }) {
   const { socket, connected } = useSocket();
   const [playerCounts, setPlayerCounts] = useState({
-    speedTicTacToe: 0
+    speedTicTacToe: 0,
+    nineMensMorris: 0
   });
 
   useEffect(() => {
@@ -85,32 +86,33 @@ export default function GameLobby({ onGameSelect, onViewLeaderboard, username })
             </button>
           </div>
 
-          {/* Coming Soon Card */}
-          <div className="bg-white rounded-3xl shadow-2xl p-6 opacity-60">
-            <div className="text-6xl mb-4 text-center">🎯</div>
+          {/* Nine Men's Morris Card */}
+          <div className="bg-white rounded-3xl shadow-2xl p-6 hover:scale-105 transition-transform">
+            <div className="text-6xl mb-4 text-center">⭕</div>
             <h2 className="text-2xl font-bold text-gray-800 mb-2 text-center">
-              Speed Chess
+              Nine Men's Morris
             </h2>
             <p className="text-gray-600 mb-4 text-center text-sm">
-              Coming Soon
+              Best of 5 • 10s per move • Strategic
             </p>
-            
-            <div className="bg-gray-100 rounded-xl p-3 mb-4">
+
+            <div className="bg-amber-100 rounded-xl p-3 mb-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-600">
+                <span className="text-sm font-medium text-amber-800">
                   Players Online
                 </span>
-                <span className="text-2xl font-bold text-gray-400">
-                  -
+                <span className="text-2xl font-bold text-amber-600">
+                  {playerCounts.nineMensMorris}
                 </span>
               </div>
             </div>
 
             <button
-              disabled
-              className="w-full bg-gray-400 text-white font-bold py-3 rounded-xl cursor-not-allowed"
+              onClick={() => handlePlayGame('nineMensMorris')}
+              disabled={!connected}
+              className="w-full bg-amber-600 text-white font-bold py-3 rounded-xl hover:bg-amber-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
-              Coming Soon
+              {connected ? 'Play Now' : 'Connecting...'}
             </button>
           </div>
 

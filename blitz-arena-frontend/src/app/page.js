@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import AuthPage from '@/components/AuthPage';
 import GameLobby from '@/components/GameLobby';
 import SpeedTicTacToe from '@/components/SpeedTicTacToe';
+import NineMensMorris from '@/components/NineMensMorris';
 import Leaderboard from '@/components/Leaderboard';
 
 export default function Home() {
@@ -44,7 +45,17 @@ export default function Home() {
 
   if (currentView === 'game' && currentGame === 'speedTicTacToe') {
     return (
-      <SpeedTicTacToe 
+      <SpeedTicTacToe
+        userId={user.id}
+        username={profile.username}
+        onBackToLobby={handleBackToLobby}
+      />
+    );
+  }
+
+  if (currentView === 'game' && currentGame === 'nineMensMorris') {
+    return (
+      <NineMensMorris
         userId={user.id}
         username={profile.username}
         onBackToLobby={handleBackToLobby}
@@ -53,7 +64,7 @@ export default function Home() {
   }
 
   return (
-    <GameLobby 
+    <GameLobby
       username={profile.username}
       onGameSelect={handleGameSelect}
       onViewLeaderboard={handleViewLeaderboard}
