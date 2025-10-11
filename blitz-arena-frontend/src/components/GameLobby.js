@@ -90,7 +90,7 @@ export default function GameLobby({ onGameSelect, onViewLeaderboard, username })
           <div className="bg-white rounded-3xl shadow-2xl p-6 hover:scale-105 transition-transform">
             <div className="text-6xl mb-4 text-center">⭕</div>
             <h2 className="text-2xl font-bold text-gray-800 mb-2 text-center">
-              Nine Men's Morris
+              Nine Men&apos;s Morris
             </h2>
             <p className="text-gray-600 mb-4 text-center text-sm">
               Best of 5 • 10s per move • Strategic
