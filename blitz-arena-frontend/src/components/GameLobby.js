@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useSocket } from '@/contexts/SocketContext';
+import AdBanner from './AdBanner';
 
 export default function GameLobby({ onGameSelect, onViewLeaderboard, username }) {
   const { socket, connected } = useSocket();
@@ -145,6 +146,9 @@ export default function GameLobby({ onGameSelect, onViewLeaderboard, username })
             </button>
           </div>
         </div>
+
+        {/* AdSense Banner - Only shows in lobby, not during gameplay */}
+        <AdBanner />
       </div>
     </div>
   );
