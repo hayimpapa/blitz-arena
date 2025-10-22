@@ -117,32 +117,32 @@ export default function GameLobby({ onGameSelect, onViewLeaderboard, username })
             </button>
           </div>
 
-          {/* Coming Soon Card 2 */}
-          <div className="bg-white rounded-3xl shadow-2xl p-6 opacity-60">
-            <div className="text-6xl mb-4 text-center">🎮</div>
+          {/* Emoji Chaos Match Card */}
+          <div className="bg-white rounded-3xl shadow-2xl p-6 hover:scale-105 transition-transform">
+            <div className="text-6xl mb-4 text-center">🎭</div>
             <h2 className="text-2xl font-bold text-gray-800 mb-2 text-center">
-              Quick Draw
+              Emoji Chaos Match
             </h2>
             <p className="text-gray-600 mb-4 text-center text-sm">
-              Coming Soon
+              2 Player Memory • Local Play
             </p>
-            
-            <div className="bg-gray-100 rounded-xl p-3 mb-4">
+
+            <div className="bg-pink-100 rounded-xl p-3 mb-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-600">
-                  Players Online
+                <span className="text-sm font-medium text-pink-800">
+                  Mode
                 </span>
-                <span className="text-2xl font-bold text-gray-400">
-                  -
+                <span className="text-xl font-bold text-pink-600">
+                  Local
                 </span>
               </div>
             </div>
 
             <button
-              disabled
-              className="w-full bg-gray-400 text-white font-bold py-3 rounded-xl cursor-not-allowed"
+              onClick={() => window.open('/emoji-chaos-match.html', '_blank')}
+              className="w-full bg-pink-600 text-white font-bold py-3 rounded-xl hover:bg-pink-700 transition-colors"
             >
-              Coming Soon
+              Play Now
             </button>
           </div>
         </div>
