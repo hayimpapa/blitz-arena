@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emoji Chaos Match - Two Player Memory Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            color: #fff;
+        }
+
+        .game-container {
+            max-width: 500px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 2rem;
+            margin-bottom: 1.5rem;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .score-board {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .player-score {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            padding: 1rem;
+            border-radius: 16px;
+            text-align: center;
+            transition: all 0.3s ease;
+            border: 3px solid transparent;
+        }
+
+        .player-score.active {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: #fbbf24;
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(251, 191, 36, 0.5);
+        }
+
+        .player-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            margin-bottom: 0.5rem;
+        }
+
+        .score {
+            font-size: 2.5rem;
+            font-weight: bold;
+        }
+
+        .turn-indicator {
+            text-align: center;
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            background: rgba(251, 191, 36, 0.3);
+            border-radius: 12px;
+            border: 2px solid #fbbf24;
+        }
+
+        .game-board {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card {
+            aspect-ratio: 1;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            min-height: 80px;
+            position: relative;
+            transform-style: preserve-3d;
+        }
+
+        .card:active {
+            transform: scale(0.95);
+        }
+
+        .card.flipped {
+            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+            animation: flip 0.4s ease;
+        }
+
+        .card.matched {
+            animation: match 0.5s ease;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .card.disabled {
+            pointer-events: none;
+            opacity: 0.7;
+        }
+
+        .card-back {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+        }
+
+        .card-front {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+        }
+
+        .card.flipped .card-back {
+            opacity: 0;
+        }
+
+        .card.flipped .card-front {
+            opacity: 1;
+        }
+
+        @keyframes flip {
+            0%, 100% { transform: rotateY(0deg); }
+            50% { transform: rotateY(90deg); }
+        }
+
+        @keyframes match {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(0); opacity: 0; }
+        }
+
+        .play-again-btn {
+            width: 100%;
+            padding: 1rem;
+            font-size: 1.2rem;
+            font-weight: bold;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            border: none;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            display: none;
+        }
+
+        .play-again-btn.show {
+            display: block;
+        }
+
+        .play-again-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .play-again-btn:active {
+            transform: translateY(0);
+        }
+
+        /* Rules Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 1rem;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 24px;
+            padding: 2rem;
+            max-width: 400px;
+            width: 100%;
+            position: relative;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .modal h2 {
+            font-size: 1.8rem;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+
+        .modal h3 {
+            font-size: 1.2rem;
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+            color: #fbbf24;
+        }
+
+        .modal p, .modal ul {
+            line-height: 1.6;
+            margin-bottom: 1rem;
+            opacity: 0.95;
+        }
+
+        .modal ul {
+            padding-left: 1.5rem;
+        }
+
+        .modal li {
+            margin-bottom: 0.5rem;
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .close-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: rotate(90deg);
+        }
+
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+        }
+
+        .checkbox-container input[type="checkbox"] {
+            width: 1.2rem;
+            height: 1.2rem;
+            cursor: pointer;
+        }
+
+        .checkbox-container label {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .winner-announcement {
+            text-align: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            padding: 1rem;
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+            border-radius: 16px;
+            animation: bounce 0.5s ease;
+            display: none;
+        }
+
+        .winner-announcement.show {
+            display: block;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        @media (min-width: 768px) {
+            .game-board {
+                grid-template-columns: repeat(4, 1fr);
+            }
+
+            .card {
+                font-size: 3.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1>🎮 Emoji Chaos Match</h1>
+
+        <div class="score-board">
+            <div class="player-score active" id="player1-score">
+                <div class="player-label">Player 1</div>
+                <div class="score">0</div>
+            </div>
+            <div class="player-score" id="player2-score">
+                <div class="player-label">Player 2</div>
+                <div class="score">0</div>
+            </div>
+        </div>
+
+        <div class="turn-indicator" id="turn-indicator">
+            Player 1's Turn
+        </div>
+
+        <div class="winner-announcement" id="winner-announcement"></div>
+
+        <div class="game-board" id="game-board"></div>
+
+        <button class="play-again-btn" id="play-again-btn">🎉 Play Again</button>
+    </div>
+
+    <!-- Rules Modal -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal">
+            <button class="close-btn" id="close-modal">&times;</button>
+            <h2>🎯 How to Play</h2>
+
+            <h3>Objective</h3>
+            <p>Be the first player to collect 10 points by finding matching emoji pairs!</p>
+
+            <h3>How to Play</h3>
+            <ul>
+                <li>Players take turns tapping two cards to reveal emojis</li>
+                <li>If the emojis match, they disappear and you earn a point</li>
+                <li>If they don't match, they flip back after 1 second</li>
+                <li>Remember where emojis are located to make matches!</li>
+                <li>Keep playing until someone reaches 10 points</li>
+            </ul>
+
+            <h3>Scoring</h3>
+            <p>Each matching pair = 1 point<br>First to 10 points wins!</p>
+
+            <div class="checkbox-container">
+                <input type="checkbox" id="dont-show-again">
+                <label for="dont-show-again">Don't show this again</label>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Game State
+        const emojis = ['🎮', '🎨', '🎭', '🎪', '🎸', '🎯', '🍕', '🍔', '🍦', '🌮', '🌈', '⭐', '🔥', '💎', '🎉', '🚀'];
+        let gameState = {
+            currentPlayer: 1,
+            scores: { player1: 0, player2: 0 },
+            flippedCards: [],
+            matchedPairs: 0,
+            isProcessing: false,
+            cards: []
+        };
+
+        // DOM Elements
+        const gameBoard = document.getElementById('game-board');
+        const player1ScoreEl = document.getElementById('player1-score');
+        const player2ScoreEl = document.getElementById('player2-score');
+        const turnIndicator = document.getElementById('turn-indicator');
+        const playAgainBtn = document.getElementById('play-again-btn');
+        const winnerAnnouncement = document.getElementById('winner-announcement');
+        const modalOverlay = document.getElementById('modal-overlay');
+        const closeModalBtn = document.getElementById('close-modal');
+        const dontShowAgainCheckbox = document.getElementById('dont-show-again');
+
+        // Initialize game
+        function initGame() {
+            // Reset game state
+            gameState = {
+                currentPlayer: 1,
+                scores: { player1: 0, player2: 0 },
+                flippedCards: [],
+                matchedPairs: 0,
+                isProcessing: false,
+                cards: []
+            };
+
+            // Select 6 random emojis and create pairs
+            const selectedEmojis = shuffleArray([...emojis]).slice(0, 6);
+            const cardEmojis = shuffleArray([...selectedEmojis, ...selectedEmojis]);
+
+            // Create cards
+            gameState.cards = cardEmojis.map((emoji, index) => ({
+                id: index,
+                emoji: emoji,
+                isFlipped: false,
+                isMatched: false
+            }));
+
+            // Render board
+            renderBoard();
+            updateUI();
+
+            // Hide winner elements
+            winnerAnnouncement.classList.remove('show');
+            playAgainBtn.classList.remove('show');
+        }
+
+        function shuffleArray(array) {
+            const newArray = [...array];
+            for (let i = newArray.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+            }
+            return newArray;
+        }
+
+        function renderBoard() {
+            gameBoard.innerHTML = '';
+            gameState.cards.forEach(card => {
+                const cardEl = document.createElement('div');
+                cardEl.className = 'card';
+                cardEl.dataset.id = card.id;
+
+                const cardBack = document.createElement('div');
+                cardBack.className = 'card-back';
+                cardBack.textContent = '❓';
+
+                const cardFront = document.createElement('div');
+                cardFront.className = 'card-front';
+                cardFront.textContent = card.emoji;
+
+                cardEl.appendChild(cardBack);
+                cardEl.appendChild(cardFront);
+                cardEl.addEventListener('click', () => handleCardClick(card.id));
+
+                gameBoard.appendChild(cardEl);
+            });
+        }
+
+        function handleCardClick(cardId) {
+            if (gameState.isProcessing) return;
+
+            const card = gameState.cards[cardId];
+            if (card.isFlipped || card.isMatched) return;
+
+            // Flip card
+            card.isFlipped = true;
+            gameState.flippedCards.push(cardId);
+            updateCardDisplay(cardId);
+
+            // Check if two cards are flipped
+            if (gameState.flippedCards.length === 2) {
+                gameState.isProcessing = true;
+                const [firstId, secondId] = gameState.flippedCards;
+                const firstCard = gameState.cards[firstId];
+                const secondCard = gameState.cards[secondId];
+
+                if (firstCard.emoji === secondCard.emoji) {
+                    // Match found
+                    setTimeout(() => {
+                        firstCard.isMatched = true;
+                        secondCard.isMatched = true;
+                        updateCardDisplay(firstId, true);
+                        updateCardDisplay(secondId, true);
+
+                        gameState.matchedPairs++;
+                        const currentPlayerKey = `player${gameState.currentPlayer}`;
+                        gameState.scores[currentPlayerKey]++;
+
+                        gameState.flippedCards = [];
+                        gameState.isProcessing = false;
+                        updateUI();
+
+                        checkWinner();
+                    }, 500);
+                } else {
+                    // No match
+                    setTimeout(() => {
+                        firstCard.isFlipped = false;
+                        secondCard.isFlipped = false;
+                        updateCardDisplay(firstId);
+                        updateCardDisplay(secondId);
+
+                        gameState.flippedCards = [];
+                        gameState.currentPlayer = gameState.currentPlayer === 1 ? 2 : 1;
+                        gameState.isProcessing = false;
+                        updateUI();
+                    }, 1000);
+                }
+            }
+        }
+
+        function updateCardDisplay(cardId, matched = false) {
+            const cardEl = document.querySelector(`[data-id="${cardId}"]`);
+            const card = gameState.cards[cardId];
+
+            if (matched) {
+                cardEl.classList.add('matched');
+            } else if (card.isFlipped) {
+                cardEl.classList.add('flipped');
+            } else {
+                cardEl.classList.remove('flipped');
+            }
+
+            // Disable all cards during processing
+            if (gameState.isProcessing) {
+                document.querySelectorAll('.card').forEach(el => {
+                    if (!gameState.cards[el.dataset.id].isMatched) {
+                        el.classList.add('disabled');
+                    }
+                });
+            } else {
+                document.querySelectorAll('.card').forEach(el => {
+                    el.classList.remove('disabled');
+                });
+            }
+        }
+
+        function updateUI() {
+            // Update scores
+            player1ScoreEl.querySelector('.score').textContent = gameState.scores.player1;
+            player2ScoreEl.querySelector('.score').textContent = gameState.scores.player2;
+
+            // Update active player
+            if (gameState.currentPlayer === 1) {
+                player1ScoreEl.classList.add('active');
+                player2ScoreEl.classList.remove('active');
+                turnIndicator.textContent = "Player 1's Turn";
+            } else {
+                player1ScoreEl.classList.remove('active');
+                player2ScoreEl.classList.add('active');
+                turnIndicator.textContent = "Player 2's Turn";
+            }
+        }
+
+        function checkWinner() {
+            if (gameState.scores.player1 >= 10) {
+                showWinner(1);
+            } else if (gameState.scores.player2 >= 10) {
+                showWinner(2);
+            }
+        }
+
+        function showWinner(player) {
+            winnerAnnouncement.textContent = `🎉 Player ${player} Wins! 🎉`;
+            winnerAnnouncement.classList.add('show');
+            playAgainBtn.classList.add('show');
+
+            // Disable all remaining cards
+            document.querySelectorAll('.card').forEach(el => {
+                el.classList.add('disabled');
+            });
+        }
+
+        // Modal functions
+        function showModal() {
+            modalOverlay.classList.add('show');
+        }
+
+        function hideModal() {
+            modalOverlay.classList.remove('show');
+
+            // Save preference if checked
+            if (dontShowAgainCheckbox.checked) {
+                localStorage.setItem('emojiChaosHideRules', 'true');
+            }
+        }
+
+        function checkFirstVisit() {
+            const hideRules = localStorage.getItem('emojiChaosHideRules');
+            if (!hideRules) {
+                showModal();
+            }
+        }
+
+        // Event listeners
+        playAgainBtn.addEventListener('click', initGame);
+        closeModalBtn.addEventListener('click', hideModal);
+        modalOverlay.addEventListener('click', (e) => {
+            if (e.target === modalOverlay) {
+                hideModal();
+            }
+        });
+
+        // Start game
+        initGame();
+        checkFirstVisit();
+    </script>
+</body>
+</html>
