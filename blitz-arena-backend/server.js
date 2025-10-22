@@ -66,7 +66,10 @@ io.on('connection', (socket) => {
                         room.gameType === 'speedTicTacToe' && room.status === 'playing').length * 2),
       nineMensMorris: (waitingPlayers.get('nineMensMorris')?.length || 0) +
                       (Array.from(gameRooms.values()).filter(room =>
-                        room.gameType === 'nineMensMorris' && room.status === 'playing').length * 2)
+                        room.gameType === 'nineMensMorris' && room.status === 'playing').length * 2),
+      emojiChaosMatch: (waitingPlayers.get('emojiChaosMatch')?.length || 0) +
+                      (Array.from(gameRooms.values()).filter(room =>
+                        room.gameType === 'emojiChaosMatch' && room.status === 'playing').length * 2)
     };
     socket.emit('player_counts', counts);
   });
@@ -118,6 +121,8 @@ io.on('connection', (socket) => {
       handleTicTacToeMove(room, socket, move);
     } else if (room.gameType === 'nineMensMorris') {
       handleNineMensMorrisMove(room, socket, move);
+    } else if (room.gameType === 'emojiChaosMatch') {
+      handleEmojiChaosMove(room, socket, move);
     }
   });
 // Handle rematch request
@@ -314,6 +319,24 @@ async function createGameRoom(gameType, player1, player2) {
       piecesOnBoard: [0, 0], // Track pieces on board
       phase: 'placement', // 'placement', 'movement', or 'removal'
       millFormed: false, // Track if current player just formed a mill
+      status: 'playing',
+      startTime: Date.now()
+    };
+  } else if (gameType === 'emojiChaosMatch') {
+    const emojis = ['🎮', '🎨', '🎭', '🎪', '🎸', '🎯', '🍕', '🍔', '🍦', '🌮', '🌈', '⭐', '🔥', '💎', '🎉', '🚀'];
+    const selectedEmojis = shuffleArray([...emojis]).slice(0, 6);
+    const board = shuffleArray([...selectedEmojis, ...selectedEmojis]);
+
+    room = {
+      id: roomId,
+      gameType,
+      players: [player1, player2],
+      currentRound: 0,
+      scores: [0, 0],
+      currentPlayer: 0,
+      board: board,
+      flippedCards: [],
+      matchedCards: [],
       status: 'playing',
       startTime: Date.now()
     };
@@ -620,6 +643,98 @@ function canOpponentMove(board, symbol, canFly) {
   return false;
 }
 
+// Handle Emoji Chaos Match move
+function handleEmojiChaosMove(room, socket, move) {
+  const { position } = move;
+  const playerIndex = room.players.findIndex(p => p.socket.id === socket.id);
+
+  console.log('Emoji Chaos move attempt:', { position, playerIndex, currentPlayer: room.currentPlayer });
+
+  if (playerIndex !== room.currentPlayer) {
+    console.log('Invalid move: Not your turn');
+    socket.emit('invalid_move', { reason: 'Not your turn' });
+    return;
+  }
+
+  if (room.flippedCards.includes(position) || room.matchedCards.includes(position)) {
+    console.log('Invalid move: Card already flipped or matched');
+    socket.emit('invalid_move', { reason: 'Card already flipped' });
+    return;
+  }
+
+  if (room.flippedCards.length >= 2) {
+    console.log('Invalid move: Already flipped 2 cards');
+    socket.emit('invalid_move', { reason: 'Already flipped 2 cards' });
+    return;
+  }
+
+  // Clear turn timer since a valid move was made
+  connectionManager.clearTurnTimer(room.id);
+
+  // Flip the card
+  room.flippedCards.push(position);
+  console.log('Card flipped:', { position, emoji: room.board[position], flippedCards: room.flippedCards });
+
+  if (room.flippedCards.length === 2) {
+    const [firstPos, secondPos] = room.flippedCards;
+    const firstEmoji = room.board[firstPos];
+    const secondEmoji = room.board[secondPos];
+
+    if (firstEmoji === secondEmoji) {
+      // Match found! Add to matched cards and give point to current player
+      room.matchedCards.push(firstPos, secondPos);
+      room.scores[playerIndex]++;
+      room.flippedCards = [];
+
+      console.log('Match found!', { emoji: firstEmoji, scores: room.scores });
+
+      // Check if player won the round (3 matches = win)
+      if (room.scores[playerIndex] >= 3) {
+        handleRoundEnd(room, playerIndex);
+        return;
+      }
+
+      // Check if all cards matched (draw condition)
+      if (room.matchedCards.length === room.board.length) {
+        // Determine winner by score
+        if (room.scores[0] > room.scores[1]) {
+          handleRoundEnd(room, 0);
+        } else if (room.scores[1] > room.scores[0]) {
+          handleRoundEnd(room, 1);
+        } else {
+          handleRoundEnd(room, -1); // Draw
+        }
+        return;
+      }
+
+      // Player keeps their turn after a match
+      io.to(room.id).emit('game_state', getGameState(room));
+      startTurnTimer(room);
+    } else {
+      // No match - send state with flipped cards visible
+      io.to(room.id).emit('game_state', getGameState(room));
+
+      // After 1 second, unflip cards and switch turn
+      setTimeout(() => {
+        // Check if room still exists
+        if (!gameRooms.has(room.id)) return;
+
+        room.flippedCards = [];
+        room.currentPlayer = 1 - room.currentPlayer;
+
+        console.log('No match, switching turn to player:', room.currentPlayer);
+
+        io.to(room.id).emit('game_state', getGameState(room));
+        startTurnTimer(room);
+      }, 1000);
+    }
+  } else {
+    // Only one card flipped, send state and wait for second card
+    io.to(room.id).emit('game_state', getGameState(room));
+    startTurnTimer(room);
+  }
+}
+
 // Handle round end
 function handleRoundEnd(room, winnerIndex) {
   // Clear turn timer
@@ -645,6 +760,12 @@ function handleRoundEnd(room, winnerIndex) {
       room.piecesOnBoard = [0, 0];
       room.phase = 'placement';
       room.millFormed = false;
+    } else if (room.gameType === 'emojiChaosMatch') {
+      const emojis = ['🎮', '🎨', '🎭', '🎪', '🎸', '🎯', '🍕', '🍔', '🍦', '🌮', '🌈', '⭐', '🔥', '💎', '🎉', '🚀'];
+      const selectedEmojis = shuffleArray([...emojis]).slice(0, 6);
+      room.board = shuffleArray([...selectedEmojis, ...selectedEmojis]);
+      room.flippedCards = [];
+      room.matchedCards = [];
     }
 
     room.currentPlayer = room.currentRound % 2;
@@ -811,7 +932,26 @@ function getGameState(room) {
       phase: room.phase,
       millFormed: room.millFormed
     };
+  } else if (room.gameType === 'emojiChaosMatch') {
+    return {
+      board: room.board,
+      currentPlayer: room.currentPlayer,
+      scores: room.scores,
+      round: room.currentRound + 1,
+      flippedCards: room.flippedCards,
+      matchedCards: room.matchedCards
+    };
   }
+}
+
+// Shuffle array helper function
+function shuffleArray(array) {
+  const newArray = [...array];
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
 }
 
 // Start turn timer for current player
@@ -918,7 +1058,10 @@ function broadcastPlayerCounts() {
                       room.gameType === 'speedTicTacToe' && room.status === 'playing').length * 2),
     nineMensMorris: (waitingPlayers.get('nineMensMorris')?.length || 0) +
                     (Array.from(gameRooms.values()).filter(room =>
-                      room.gameType === 'nineMensMorris' && room.status === 'playing').length * 2)
+                      room.gameType === 'nineMensMorris' && room.status === 'playing').length * 2),
+    emojiChaosMatch: (waitingPlayers.get('emojiChaosMatch')?.length || 0) +
+                    (Array.from(gameRooms.values()).filter(room =>
+                      room.gameType === 'emojiChaosMatch' && room.status === 'playing').length * 2)
   };
   io.emit('player_counts', counts);
 }

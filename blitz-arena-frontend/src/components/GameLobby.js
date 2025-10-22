@@ -8,7 +8,8 @@ export default function GameLobby({ onGameSelect, onViewLeaderboard, username })
   const { socket, connected } = useSocket();
   const [playerCounts, setPlayerCounts] = useState({
     speedTicTacToe: 0,
-    nineMensMorris: 0
+    nineMensMorris: 0,
+    emojiChaosMatch: 0
   });
 
   useEffect(() => {
@@ -124,25 +125,26 @@ export default function GameLobby({ onGameSelect, onViewLeaderboard, username })
               Emoji Chaos Match
             </h2>
             <p className="text-gray-600 mb-4 text-center text-sm">
-              2 Player Memory • Local Play
+              Best of 5 • 10s per turn • Memory
             </p>
 
             <div className="bg-pink-100 rounded-xl p-3 mb-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-pink-800">
-                  Mode
+                  Players Online
                 </span>
-                <span className="text-xl font-bold text-pink-600">
-                  Local
+                <span className="text-2xl font-bold text-pink-600">
+                  {playerCounts.emojiChaosMatch}
                 </span>
               </div>
             </div>
 
             <button
-              onClick={() => window.open('/emoji-chaos-match.html', '_blank')}
-              className="w-full bg-pink-600 text-white font-bold py-3 rounded-xl hover:bg-pink-700 transition-colors"
+              onClick={() => handlePlayGame('emojiChaosMatch')}
+              disabled={!connected}
+              className="w-full bg-pink-600 text-white font-bold py-3 rounded-xl hover:bg-pink-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
-              Play Now
+              {connected ? 'Play Now' : 'Connecting...'}
             </button>
           </div>
         </div>
